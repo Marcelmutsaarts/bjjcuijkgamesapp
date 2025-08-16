@@ -679,13 +679,13 @@
                 <button class="btn btn-primary" onclick="openNewGameModal()">
                     <span>➕</span> Nieuwe Game
                 </button>
-                <button class="btn btn-success" onclick="exportGames()">
-                    <span>💾</span> Exporteer Games
+                <button class="btn btn-success" onclick="exportAll()">
+                    <span>💾</span> Exporteer Alles
                 </button>
-                <label for="importGamesFile" class="file-label">
-                    <span>📁</span> Importeer Games
+                <label for="importAllFile" class="file-label">
+                    <span>📁</span> Importeer Alles
                 </label>
-                <input type="file" id="importGamesFile" accept=".json" onchange="importGames(event)">
+                <input type="file" id="importAllFile" accept=".json" onchange="importAll(event)">
             </div>
 
             <div class="content-container" id="gamesContainer">
@@ -705,13 +705,13 @@
                 <button class="btn btn-warning" onclick="switchTab('compose')">
                     <span>📝</span> Nieuwe Les
                 </button>
-                <button class="btn btn-success" onclick="exportLessons()">
-                    <span>💾</span> Exporteer Lessen
+                <button class="btn btn-success" onclick="exportAll()">
+                    <span>💾</span> Exporteer Alles
                 </button>
-                <label for="importLessonsFile" class="file-label">
-                    <span>📁</span> Importeer Lessen
+                <label for="importAllFile2" class="file-label">
+                    <span>📁</span> Importeer Alles
                 </label>
-                <input type="file" id="importLessonsFile" accept=".json" onchange="importLessons(event)">
+                <input type="file" id="importAllFile2" accept=".json" onchange="importAll(event)">
             </div>
 
             <div class="content-container" id="lessonsContainer">
@@ -1627,26 +1627,78 @@
         }
 
         // Export/Import functions
-        function exportGames() {
-            gameManager.exportToJSON();
+        function exportAll() {
+            const allData = {
+                games: gameManager.games,
+                lessons: lessonManager.lessons,
+                exportDate: new Date().toISOString(),
+                version: "2.0"
+            };
+            
+            const dataStr = JSON.stringify(allData, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            const exportFileDefaultName = `bjj-complete-${new Date().toISOString().split('T')[0]}.json`;
+            
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+            
+            showToast(`${gameManager.games.length} games + ${lessonManager.lessons.length} lessen geëxporteerd`, 'success');
         }
 
-        function importGames(event) {
+        function importAll(event) {
             const file = event.target.files[0];
             if (file) {
-                gameManager.importFromJSON(file);
-                event.target.value = '';
-            }
-        }
-
-        function exportLessons() {
-            lessonManager.exportToJSON();
-        }
-
-        function importLessons(event) {
-            const file = event.target.files[0];
-            if (file) {
-                lessonManager.importFromJSON(file);
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const imported = JSON.parse(e.target.result);
+                        
+                        // Check if it's the new combined format
+                        if (imported.games && imported.lessons) {
+                            const gameCount = imported.games.length || 0;
+                            const lessonCount = imported.lessons.length || 0;
+                            const currentGameCount = gameManager.games.length;
+                            const currentLessonCount = lessonManager.lessons.length;
+                            
+                            const confirm = window.confirm(
+                                `Dit vervangt je huidige data:\n` +
+                                `Games: ${currentGameCount} → ${gameCount}\n` +
+                                `Lessen: ${currentLessonCount} → ${lessonCount}\n\n` +
+                                `Doorgaan?`
+                            );
+                            
+                            if (confirm) {
+                                gameManager.games = imported.games || [];
+                                lessonManager.lessons = imported.lessons || [];
+                                gameManager.saveToStorage();
+                                lessonManager.saveToStorage();
+                                renderGames();
+                                renderLessons();
+                                renderAvailableGames();
+                                showToast(`${gameCount} games + ${lessonCount} lessen geïmporteerd`, 'success');
+                            }
+                        }
+                        // Backward compatibility: if it's just an array, assume it's games only
+                        else if (Array.isArray(imported)) {
+                            const confirm = window.confirm(`Dit lijkt een oud games-bestand. Alleen games importeren (${imported.length} games)? Lessen blijven ongewijzigd.`);
+                            if (confirm) {
+                                gameManager.games = imported;
+                                gameManager.saveToStorage();
+                                renderGames();
+                                renderAvailableGames();
+                                showToast(`${imported.length} games geïmporteerd`, 'success');
+                            }
+                        }
+                        else {
+                            throw new Error('Invalid format');
+                        }
+                    } catch (error) {
+                        showToast('Fout bij importeren: ongeldig bestand', 'error');
+                    }
+                };
+                reader.readAsText(file);
                 event.target.value = '';
             }
         }
