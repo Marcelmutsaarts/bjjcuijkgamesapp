@@ -2036,11 +2036,26 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             
             if (typeof supabase === 'undefined' || !supabase.createClient) {
-                console.warn('⚠️ Supabase library niet geladen');
+                console.warn('⚠️ Supabase library niet geladen via CDN, probeer dynamic import');
+                try {
+                    const module = await import('https://esm.sh/@supabase/supabase-js@2');
+                    if (module && module.createClient) {
+                        console.log('✅ Supabase geladen via dynamic import (esm.sh)');
+                        window.supabase = {
+                            createClient: module.createClient
+                        };
+                    }
+                } catch (importError) {
+                    console.error('❌ Dynamic import van Supabase mislukt:', importError);
+                }
+            }
+            
+            if (typeof supabase === 'undefined' || !supabase.createClient) {
+                console.warn('⚠️ Supabase library nog steeds niet geladen');
                 console.warn('Browser:', navigator.userAgent);
                 console.warn('Mogelijke oorzaken:');
-                console.warn('- Chrome extensies blokkeren de CDN');
-                console.warn('- Network/firewall blokkeert cdn.jsdelivr.net');
+                console.warn('- Browserextensies blokkeren externe scripts');
+                console.warn('- Network/firewall blokkeert alle Supabase CDN endpoints');
                 console.warn('- Content Security Policy blokkeert externe scripts');
                 supabaseClient = null;
                 return;

@@ -285,12 +285,12 @@
     </script>
     <!-- Supabase Client - Try multiple CDNs for better compatibility -->
     <script>
-        // Try to load Supabase from multiple CDNs
+        // Try to load Supabase from multiple CDNs (UMD builds)
         function loadSupabase() {
             const cdnUrls = [
-                'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2',
-                'https://unpkg.com/@supabase/supabase-js@2',
-                'https://esm.sh/@supabase/supabase-js@2'
+                'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',
+                'https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.min.js',
+                'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js'
             ];
             
             let currentIndex = 0;
@@ -305,6 +305,8 @@
                 
                 const script = document.createElement('script');
                 script.src = cdnUrls[index];
+                script.async = true;
+                script.crossOrigin = 'anonymous';
                 script.onload = function() {
                     // Wait a bit for supabase to be available
                     setTimeout(function() {
