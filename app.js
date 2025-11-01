@@ -161,6 +161,7 @@ class GameManager {
     async addGame(game) {
         try {
             if (supabaseClient) {
+                console.log('💾 Probeer game op te slaan in Supabase...', game);
                 // Save to Supabase
                 const { data, error } = await supabaseClient
                     .from('games')
@@ -175,8 +176,17 @@ class GameManager {
                     .single();
                 
                 if (error) {
+                    console.error('❌ Supabase insert error:', error);
+                    console.error('Error details:', {
+                        message: error.message,
+                        code: error.code,
+                        details: error.details,
+                        hint: error.hint
+                    });
                     throw error;
                 }
+                
+                console.log('✅ Game succesvol opgeslagen in Supabase:', data);
                 
                 // Convert to app format
                 const newGame = {
@@ -194,7 +204,9 @@ class GameManager {
                 await this.saveToStorage();
                 renderGames();
                 renderAvailableGames();
+                showToast('Game opgeslagen in database!', 'success');
             } else {
+                console.warn('⚠️ Supabase client niet beschikbaar, gebruik localStorage fallback');
                 // Fallback to localStorage
                 game.id = Date.now().toString(36) + Math.random().toString(36).substring(2);
                 game.createdAt = new Date().toISOString();
@@ -203,12 +215,14 @@ class GameManager {
                 await this.saveToStorage();
                 renderGames();
                 renderAvailableGames();
+                showToast('Game opgeslagen lokaal (Supabase niet beschikbaar)', 'warning');
             }
         } catch (e) {
             console.error('❌ Error adding game:', e);
             const errorMsg = e?.message || e?.error?.message || 'Onbekende fout';
             console.error('Error details:', e);
             showToast(`Fout bij toevoegen: ${errorMsg}`, 'error');
+            throw e; // Re-throw zodat de caller weet dat het mislukt is
         }
     }
 
@@ -1134,13 +1148,19 @@ async function saveGame() {
         return;
     }
 
-    if (gameManager.currentEditId) {
-        await gameManager.updateGame(gameManager.currentEditId, game);
-    } else {
-        await gameManager.addGame(game);
+    try {
+        if (gameManager.currentEditId) {
+            await gameManager.updateGame(gameManager.currentEditId, game);
+            showToast('Game bijgewerkt!', 'success');
+        } else {
+            await gameManager.addGame(game);
+            // addGame toont al een success message
+        }
+        closeModal('gameModal');
+    } catch (e) {
+        console.error('Fout bij opslaan game:', e);
+        // Error message wordt al getoond door addGame/updateGame
     }
-
-    closeModal('gameModal');
 }
 
 async function deleteGame() {
@@ -1977,15 +1997,27 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
                 console.error('❌ Supabase credentials ontbreken:', { 
                     hasUrl: !!SUPABASE_URL, 
-                    hasKey: !!SUPABASE_ANON_KEY 
+                    hasKey: !!SUPABASE_ANON_KEY,
+                    url: SUPABASE_URL,
+                    keyLength: SUPABASE_ANON_KEY?.length
                 });
                 supabaseClient = null;
             } else {
                 supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
                 console.log('✅ Supabase client geïnitialiseerd', { 
                     url: SUPABASE_URL.substring(0, 30) + '...',
-                    hasKey: !!SUPABASE_ANON_KEY 
+                    hasKey: !!SUPABASE_ANON_KEY,
+                    keyLength: SUPABASE_ANON_KEY.length
                 });
+                
+                // Test de connectie
+                const { data, error } = await supabaseClient.from('games').select('id').limit(1);
+                if (error) {
+                    console.error('⚠️ Supabase connectie test mislukt:', error);
+                    console.error('Dit kan betekenen dat RLS policies niet correct zijn ingesteld');
+                } else {
+                    console.log('✅ Supabase connectie test geslaagd');
+                }
             }
         } else {
             console.warn('⚠️ Supabase library niet geladen, gebruik localStorage als fallback');
