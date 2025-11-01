@@ -2113,7 +2113,7 @@ window.printLesson = printLesson;
 window.closeModal = closeModal;
 window.exportAll = exportAll;
 window.importAll = importAll;
-window.refreshData = refreshData;
+// refreshData is already assigned above, before DOMContentLoaded
 window.toggleTheme = toggleTheme;
 window.toggleBulkSelect = toggleBulkSelect;
 window.bulkDeleteGames = bulkDeleteGames;
