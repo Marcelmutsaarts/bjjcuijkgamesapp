@@ -79,13 +79,17 @@ class GameManager {
 
     async loadGames() {
         this.loading = true;
+        console.log('📥 Start loading games...', { supabaseClient: !!supabaseClient });
         try {
             if (supabaseClient) {
+                console.log('📥 Loading from Supabase...');
                 // Load from Supabase
                 const { data, error } = await supabaseClient
                     .from('games')
                     .select('*')
                     .order('created_at', { ascending: false });
+                
+                console.log('📥 Supabase response:', { data, error });
                 
                 if (error) {
                     console.error('❌ Error loading games from Supabase:', error);
@@ -99,6 +103,7 @@ class GameManager {
                     // Fallback to localStorage
                     this.loadGamesFromLocalStorage();
                 } else {
+                    console.log(`✅ Loaded ${data?.length || 0} games from Supabase`);
                     // Convert database format to app format
                     this.games = (data || []).map(game => ({
                         id: game.id,
@@ -110,13 +115,15 @@ class GameManager {
                         createdAt: game.created_at,
                         updatedAt: game.updated_at
                     }));
+                    console.log('✅ Games converted:', this.games.length);
                     updateStats();
                 }
             } else {
+                console.warn('⚠️ Supabase client niet beschikbaar, gebruik localStorage');
                 this.loadGamesFromLocalStorage();
             }
         } catch (e) {
-            console.error('Error loading games:', e);
+            console.error('❌ Error loading games:', e);
             this.loadGamesFromLocalStorage();
         } finally {
             this.loading = false;
