@@ -2019,9 +2019,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // Initialize Supabase client
-    try {
-        // Supabase is loaded via CDN and available as global 'supabase'
-        if (typeof supabase !== 'undefined' && supabase.createClient) {
+    // Wait for Supabase library to be fully loaded
+    const initSupabase = async () => {
+        try {
+            // Wait a bit for Supabase library to load
+            let attempts = 0;
+            const maxAttempts = 10;
+            
+            while (attempts < maxAttempts && (typeof supabase === 'undefined' || !supabase.createClient)) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                attempts++;
+            }
+            
+            if (typeof supabase === 'undefined' || !supabase.createClient) {
+                console.warn('⚠️ Supabase library niet geladen na', maxAttempts * 100, 'ms');
+                console.warn('Browser:', navigator.userAgent);
+                supabaseClient = null;
+                return;
+            }
+            
             if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
                 console.error('❌ Supabase credentials ontbreken:', { 
                     hasUrl: !!SUPABASE_URL, 
@@ -2030,61 +2046,91 @@ document.addEventListener('DOMContentLoaded', () => {
                     keyLength: SUPABASE_ANON_KEY?.length
                 });
                 supabaseClient = null;
-            } else {
-                supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-                console.log('✅ Supabase client geïnitialiseerd', { 
-                    url: SUPABASE_URL.substring(0, 30) + '...',
-                    hasKey: !!SUPABASE_ANON_KEY,
-                    keyLength: SUPABASE_ANON_KEY.length
-                });
-                
-                // Test de connectie (async, niet blocking)
-                (async () => {
-                    try {
-                        const { data, error } = await supabaseClient.from('games').select('id').limit(1);
-                        if (error) {
-                            console.error('⚠️ Supabase connectie test mislukt:', error);
-                            console.error('Dit kan betekenen dat RLS policies niet correct zijn ingesteld');
-                        } else {
-                            console.log('✅ Supabase connectie test geslaagd');
-                        }
-                    } catch (e) {
-                        console.error('⚠️ Fout bij connectie test:', e);
-                    }
-                })();
+                return;
             }
-        } else {
-            console.warn('⚠️ Supabase library niet geladen, gebruik localStorage als fallback');
+            
+            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            console.log('✅ Supabase client geïnitialiseerd', { 
+                url: SUPABASE_URL.substring(0, 30) + '...',
+                hasKey: !!SUPABASE_ANON_KEY,
+                keyLength: SUPABASE_ANON_KEY.length,
+                browser: navigator.userAgent.includes('Chrome') ? 'Chrome' : navigator.userAgent.includes('Edge') ? 'Edge' : 'Other'
+            });
+            
+            // Test de connectie (async, niet blocking)
+            (async () => {
+                try {
+                    const { data, error } = await supabaseClient.from('games').select('id').limit(1);
+                    if (error) {
+                        console.error('⚠️ Supabase connectie test mislukt:', error);
+                        console.error('Dit kan betekenen dat RLS policies niet correct zijn ingesteld');
+                    } else {
+                        console.log('✅ Supabase connectie test geslaagd');
+                    }
+                } catch (e) {
+                    console.error('⚠️ Fout bij connectie test:', e);
+                }
+            })();
+        } catch (e) {
+            console.error('❌ Fout bij initialiseren Supabase:', e);
+            console.error('Error details:', {
+                message: e.message,
+                stack: e.stack,
+                browser: navigator.userAgent
+            });
             supabaseClient = null;
         }
-    } catch (e) {
-        console.error('❌ Fout bij initialiseren Supabase:', e);
-        supabaseClient = null;
-    }
+    };
     
-    // Initialize managers AFTER Supabase client is ready
-    // This ensures they can load data from Supabase if available
-    gameManager = new GameManager();
-    lessonManager = new LessonManager();
-    
-    // Wait for managers to load data, then render
-    Promise.all([
-        gameManager.init(),
-        lessonManager.init()
-    ]).then(() => {
-        renderGames();
-        renderLessons();
-        renderAvailableGames();
-        updateStats();
-        updatePositionFilter();
+    // Start Supabase initialization and wait for it before initializing managers
+    initSupabase().then(() => {
+        // Initialize managers AFTER Supabase client is ready (or after timeout)
+        // This ensures they can load data from Supabase if available
+        gameManager = new GameManager();
+        lessonManager = new LessonManager();
+        
+        // Wait for managers to load data, then render
+        Promise.all([
+            gameManager.init(),
+            lessonManager.init()
+        ]).then(() => {
+            renderGames();
+            renderLessons();
+            renderAvailableGames();
+            updateStats();
+            updatePositionFilter();
+        }).catch(err => {
+            console.error('Error initializing managers:', err);
+            // Still render even if there's an error
+            renderGames();
+            renderLessons();
+            renderAvailableGames();
+            updateStats();
+            updatePositionFilter();
+        });
     }).catch(err => {
-        console.error('Error initializing managers:', err);
-        // Still render even if there's an error
-        renderGames();
-        renderLessons();
-        renderAvailableGames();
-        updateStats();
-        updatePositionFilter();
+        console.error('Error initializing Supabase:', err);
+        // Initialize managers anyway with localStorage fallback
+        gameManager = new GameManager();
+        lessonManager = new LessonManager();
+        
+        Promise.all([
+            gameManager.init(),
+            lessonManager.init()
+        ]).then(() => {
+            renderGames();
+            renderLessons();
+            renderAvailableGames();
+            updateStats();
+            updatePositionFilter();
+        }).catch(err => {
+            console.error('Error initializing managers:', err);
+            renderGames();
+            renderLessons();
+            renderAvailableGames();
+            updateStats();
+            updatePositionFilter();
+        });
     });
     
     // Load theme immediately (doesn't depend on data)
