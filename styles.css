@@ -343,6 +343,18 @@ header p {
     box-shadow: 0 4px 12px rgba(245, 158, 11, 0.35);
 }
 
+.btn-secondary {
+    background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+    color: white;
+    box-shadow: 0 2px 4px rgba(107, 114, 128, 0.2);
+}
+
+.btn-secondary:hover {
+    background: linear-gradient(135deg, #4b5563 0%, #6b7280 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(107, 114, 128, 0.35);
+}
+
 .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;

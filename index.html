@@ -27,7 +27,7 @@
                 <span id="lessonCount">0 lessen</span>
             </div>
             <div class="stats-actions">
-                <span id="lastSaved">Laatst opgeslagen: -</span>
+            <span id="lastSaved">Laatst opgeslagen: -</span>
                 <button class="stats-btn" onclick="showDashboard()" aria-label="Bekijk statistieken">📊 Dashboard</button>
             </div>
         </div>
@@ -57,6 +57,9 @@
                 </button>
                 <button class="btn btn-success" onclick="exportAll()" aria-label="Exporteer alle data">
                     <span>💾</span> Exporteer Alles
+                </button>
+                <button class="btn btn-secondary" onclick="refreshData()" aria-label="Vernieuw data uit database">
+                    <span>🔄</span> Vernieuwen
                 </button>
                 <label for="importAllFile" class="file-label" aria-label="Importeer data">
                     <span>📁</span> Importeer Alles
@@ -97,6 +100,9 @@
                 </button>
                 <button class="btn btn-success" onclick="exportAll()" aria-label="Exporteer alle data">
                     <span>💾</span> Exporteer Alles
+                </button>
+                <button class="btn btn-secondary" onclick="refreshData()" aria-label="Vernieuw data uit database">
+                    <span>🔄</span> Vernieuwen
                 </button>
                 <label for="importAllFile2" class="file-label" aria-label="Importeer data">
                     <span>📁</span> Importeer Alles
@@ -238,10 +244,10 @@
             <div class="modal-header">
                 <h2 id="confirmModalTitle">Bevestig actie</h2>
                 <button class="close-btn" onclick="closeModal('confirmModal')" aria-label="Sluit dialoog">&times;</button>
-            </div>
+                    </div>
             <div class="modal-body">
                 <p id="confirmMessage"></p>
-            </div>
+                    </div>
             <div class="modal-footer">
                 <button class="btn btn-danger" id="confirmCancelBtn" onclick="closeModal('confirmModal')" aria-label="Annuleer">
                     Annuleer
@@ -249,9 +255,9 @@
                 <button class="btn btn-primary" id="confirmOkBtn" aria-label="Bevestig">
                     Bevestig
                 </button>
-            </div>
-        </div>
-    </div>
+                </div>
+                    </div>
+                    </div>
 
     <!-- Dashboard Modal -->
     <div class="modal" id="dashboardModal" aria-hidden="true" role="dialog" aria-labelledby="dashboardModalTitle">
@@ -259,12 +265,12 @@
             <div class="modal-header">
                 <h2 id="dashboardModalTitle">Statistieken Dashboard</h2>
                 <button class="close-btn" onclick="closeModal('dashboardModal')" aria-label="Sluit dialoog">&times;</button>
-            </div>
+                    </div>
             <div class="modal-body" id="dashboardBody">
                 <!-- Dashboard content will be loaded here -->
-            </div>
-        </div>
-    </div>
+                        </div>
+                    </div>
+                    </div>
 
     <!-- Print View (hidden) -->
     <div class="lesson-print-view" id="lessonPrintView"></div>

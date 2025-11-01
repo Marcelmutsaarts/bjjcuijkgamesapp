@@ -70,7 +70,7 @@ class GameManager {
         this.undoTimeout = null;
         this.deletedGame = null;
         this.loading = false;
-        this.init();
+        // Don't call init() here - will be called explicitly after Supabase is ready
     }
 
     async init() {
@@ -442,7 +442,7 @@ class LessonManager {
         this.undoTimeout = null;
         this.deletedLesson = null;
         this.loading = false;
-        this.init();
+        // Don't call init() here - will be called explicitly after Supabase is ready
     }
 
     async init() {
@@ -744,9 +744,9 @@ class LessonManager {
     }
 }
 
-// Initialize managers
-const gameManager = new GameManager();
-const lessonManager = new LessonManager();
+// Initialize managers (will be initialized after Supabase client is ready)
+let gameManager = null;
+let lessonManager = null;
 
 // Global state
 let bulkSelectMode = false;
@@ -1765,6 +1765,33 @@ function exportAll() {
     }
 }
 
+async function refreshData() {
+    try {
+        setLoadingState(true);
+        showToast('Data wordt vernieuwd...', 'info');
+        
+        // Reload data from Supabase
+        await Promise.all([
+            gameManager.loadGames(),
+            lessonManager.loadLessons()
+        ]);
+        
+        // Refresh UI
+        renderGames();
+        renderLessons();
+        renderAvailableGames();
+        updateStats();
+        updatePositionFilter();
+        
+        showToast('Data vernieuwd!', 'success');
+        setTimeout(() => setLoadingState(false), 500);
+    } catch (e) {
+        console.error('Error refreshing data:', e);
+        showToast('Fout bij vernieuwen', 'error');
+        setLoadingState(false);
+    }
+}
+
 async function importAll(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -1969,11 +1996,33 @@ document.addEventListener('DOMContentLoaded', () => {
         supabaseClient = null;
     }
     
-    // Initialize managers (they will load data asynchronously)
+    // Initialize managers AFTER Supabase client is ready
+    // This ensures they can load data from Supabase if available
+    gameManager = new GameManager();
+    lessonManager = new LessonManager();
+    
+    // Wait for managers to load data, then render
+    Promise.all([
+        gameManager.init(),
+        lessonManager.init()
+    ]).then(() => {
+        renderGames();
+        renderLessons();
+        renderAvailableGames();
+        updateStats();
+        updatePositionFilter();
+    }).catch(err => {
+        console.error('Error initializing managers:', err);
+        // Still render even if there's an error
+        renderGames();
+        renderLessons();
+        renderAvailableGames();
+        updateStats();
+        updatePositionFilter();
+    });
+    
+    // Load theme immediately (doesn't depend on data)
     loadTheme();
-    renderGames();
-    updateStats();
-    updatePositionFilter();
     
     // Set initial ARIA attributes
     document.querySelectorAll('.modal').forEach(modal => {
@@ -1998,6 +2047,7 @@ window.printLesson = printLesson;
 window.closeModal = closeModal;
 window.exportAll = exportAll;
 window.importAll = importAll;
+window.refreshData = refreshData;
 window.toggleTheme = toggleTheme;
 window.toggleBulkSelect = toggleBulkSelect;
 window.bulkDeleteGames = bulkDeleteGames;
