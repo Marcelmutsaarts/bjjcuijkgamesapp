@@ -283,8 +283,31 @@
         window.SUPABASE_URL = '%%SUPABASE_URL%%';
         window.SUPABASE_ANON_KEY = '%%SUPABASE_ANON_KEY%%';
     </script>
-    <!-- Supabase Client -->
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <!-- Supabase Client - Load with callback to ensure it's ready -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" onload="window.supabaseLoaded = true" onerror="console.error('Failed to load Supabase library')"></script>
+    <script>
+        // Wait for Supabase to be available before loading app.js
+        (function() {
+            const checkSupabase = setInterval(function() {
+                if (typeof supabase !== 'undefined' && supabase.createClient) {
+                    clearInterval(checkSupabase);
+                    window.supabaseReady = true;
+                    // Trigger custom event
+                    window.dispatchEvent(new Event('supabaseReady'));
+                }
+            }, 50);
+            
+            // Timeout after 3 seconds
+            setTimeout(function() {
+                clearInterval(checkSupabase);
+                if (!window.supabaseReady) {
+                    console.error('Supabase library failed to load within 3 seconds');
+                    window.supabaseReady = false;
+                    window.dispatchEvent(new Event('supabaseReady'));
+                }
+            }, 3000);
+        })();
+    </script>
     <script src="app.js"></script>
 </body>
 </html>

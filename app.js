@@ -2019,21 +2019,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // Initialize Supabase client
-    // Wait for Supabase library to be fully loaded
+    // Wait for Supabase library to be fully loaded using event listener
     const initSupabase = async () => {
         try {
-            // Wait a bit for Supabase library to load
-            let attempts = 0;
-            const maxAttempts = 10;
-            
-            while (attempts < maxAttempts && (typeof supabase === 'undefined' || !supabase.createClient)) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                attempts++;
+            // Wait for supabaseReady event or check if already ready
+            if (!window.supabaseReady) {
+                await new Promise((resolve) => {
+                    if (window.supabaseReady) {
+                        resolve();
+                    } else {
+                        window.addEventListener('supabaseReady', resolve, { once: true });
+                        // Timeout after 3 seconds
+                        setTimeout(resolve, 3000);
+                    }
+                });
             }
             
             if (typeof supabase === 'undefined' || !supabase.createClient) {
-                console.warn('⚠️ Supabase library niet geladen na', maxAttempts * 100, 'ms');
+                console.warn('⚠️ Supabase library niet geladen');
                 console.warn('Browser:', navigator.userAgent);
+                console.warn('Mogelijke oorzaken:');
+                console.warn('- Chrome extensies blokkeren de CDN');
+                console.warn('- Network/firewall blokkeert cdn.jsdelivr.net');
+                console.warn('- Content Security Policy blokkeert externe scripts');
                 supabaseClient = null;
                 return;
             }
