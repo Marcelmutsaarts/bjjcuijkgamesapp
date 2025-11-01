@@ -2027,14 +2027,20 @@ document.addEventListener('DOMContentLoaded', () => {
                     keyLength: SUPABASE_ANON_KEY.length
                 });
                 
-                // Test de connectie
-                const { data, error } = await supabaseClient.from('games').select('id').limit(1);
-                if (error) {
-                    console.error('⚠️ Supabase connectie test mislukt:', error);
-                    console.error('Dit kan betekenen dat RLS policies niet correct zijn ingesteld');
-                } else {
-                    console.log('✅ Supabase connectie test geslaagd');
-                }
+                // Test de connectie (async, niet blocking)
+                (async () => {
+                    try {
+                        const { data, error } = await supabaseClient.from('games').select('id').limit(1);
+                        if (error) {
+                            console.error('⚠️ Supabase connectie test mislukt:', error);
+                            console.error('Dit kan betekenen dat RLS policies niet correct zijn ingesteld');
+                        } else {
+                            console.log('✅ Supabase connectie test geslaagd');
+                        }
+                    } catch (e) {
+                        console.error('⚠️ Fout bij connectie test:', e);
+                    }
+                })();
             }
         } else {
             console.warn('⚠️ Supabase library niet geladen, gebruik localStorage als fallback');
