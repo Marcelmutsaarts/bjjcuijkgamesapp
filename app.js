@@ -8,6 +8,13 @@ const CONSTANTS = {
     SEARCH_DEBOUNCE: 300
 };
 
+// Supabase Configuration
+const SUPABASE_URL = 'https://hgmnpvmabvtztdwovndd.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhnbW5wdm1hYnZ0enRkd292bmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5ODk2MTYsImV4cCI6MjA3NzU2NTYxNn0.9q7qng21H58g_eJ3mZBLl93HL0ZEtzfgXdm-MGZe5RI';
+
+// Initialize Supabase client (will be initialized after DOM loads)
+let supabaseClient = null;
+
 // Utility functions
 function escapeHtml(text) {
     const div = document.createElement('div');
@@ -62,88 +69,243 @@ class GameManager {
         this.searchTerm = '';
         this.undoTimeout = null;
         this.deletedGame = null;
+        this.loading = false;
         this.init();
     }
 
-    init() {
-        this.loadGames();
+    async init() {
+        await this.loadGames();
     }
 
-    loadGames() {
+    async loadGames() {
+        this.loading = true;
+        try {
+            if (supabaseClient) {
+                // Load from Supabase
+                const { data, error } = await supabaseClient
+                    .from('games')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                
+                if (error) {
+                    console.error('Error loading games from Supabase:', error);
+                    // Fallback to localStorage
+                    this.loadGamesFromLocalStorage();
+                } else {
+                    // Convert database format to app format
+                    this.games = (data || []).map(game => ({
+                        id: game.id,
+                        position: game.position || '',
+                        invariant: game.invariant || '',
+                        taskPlayerA: game.task_player_a || '',
+                        taskPlayerB: game.task_player_b || '',
+                        differentiation: game.differentiation || '',
+                        createdAt: game.created_at,
+                        updatedAt: game.updated_at
+                    }));
+                    updateStats();
+                }
+            } else {
+                this.loadGamesFromLocalStorage();
+            }
+        } catch (e) {
+            console.error('Error loading games:', e);
+            this.loadGamesFromLocalStorage();
+        } finally {
+            this.loading = false;
+        }
+    }
+
+    loadGamesFromLocalStorage() {
         const stored = localStorage.getItem('bjjGames');
         if (stored) {
             try {
                 this.games = JSON.parse(stored);
-                // Validate loaded data
                 if (!Array.isArray(this.games)) {
                     this.games = [];
                 }
             } catch (e) {
-                console.error('Error loading games:', e);
+                console.error('Error parsing localStorage:', e);
                 this.games = [];
             }
         }
     }
 
-    saveToStorage() {
+    async saveToStorage() {
         try {
-            localStorage.setItem('bjjGames', JSON.stringify(this.games));
-            localStorage.setItem('lastSaved', new Date().toISOString());
-            updateStats();
-            showToast('Games opgeslagen!', 'success');
+            if (supabaseClient) {
+                // Sync to Supabase
+                localStorage.setItem('lastSaved', new Date().toISOString());
+                updateStats();
+                showToast('Games opgeslagen!', 'success');
+            } else {
+                // Fallback to localStorage
+                localStorage.setItem('bjjGames', JSON.stringify(this.games));
+                localStorage.setItem('lastSaved', new Date().toISOString());
+                updateStats();
+                showToast('Games opgeslagen!', 'success');
+            }
         } catch (e) {
             console.error('Error saving games:', e);
             showToast('Fout bij opslaan van games', 'error');
         }
     }
 
-    generateId() {
-        return Date.now().toString(36) + Math.random().toString(36).substring(2);
-    }
-
-    addGame(game) {
-        game.id = this.generateId();
-        game.createdAt = new Date().toISOString();
-        game.updatedAt = new Date().toISOString();
-        this.games.unshift(game);
-        this.saveToStorage();
-        renderGames();
-        renderAvailableGames();
-    }
-
-    updateGame(id, updates) {
-        const index = this.games.findIndex(g => g.id === id);
-        if (index !== -1) {
-            this.games[index] = {
-                ...this.games[index],
-                ...updates,
-                updatedAt: new Date().toISOString()
-            };
-            this.saveToStorage();
-            renderGames();
-            renderAvailableGames();
+    async addGame(game) {
+        try {
+            if (supabaseClient) {
+                // Save to Supabase
+                const { data, error } = await supabaseClient
+                    .from('games')
+                    .insert({
+                        position: game.position || '',
+                        invariant: game.invariant || '',
+                        task_player_a: game.taskPlayerA || '',
+                        task_player_b: game.taskPlayerB || '',
+                        differentiation: game.differentiation || ''
+                    })
+                    .select()
+                    .single();
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Convert to app format
+                const newGame = {
+                    id: data.id,
+                    position: data.position || '',
+                    invariant: data.invariant || '',
+                    taskPlayerA: data.task_player_a || '',
+                    taskPlayerB: data.task_player_b || '',
+                    differentiation: data.differentiation || '',
+                    createdAt: data.created_at,
+                    updatedAt: data.updated_at
+                };
+                
+                this.games.unshift(newGame);
+                await this.saveToStorage();
+                renderGames();
+                renderAvailableGames();
+            } else {
+                // Fallback to localStorage
+                game.id = Date.now().toString(36) + Math.random().toString(36).substring(2);
+                game.createdAt = new Date().toISOString();
+                game.updatedAt = new Date().toISOString();
+                this.games.unshift(game);
+                await this.saveToStorage();
+                renderGames();
+                renderAvailableGames();
+            }
+        } catch (e) {
+            console.error('Error adding game:', e);
+            showToast('Fout bij toevoegen van game', 'error');
         }
     }
 
-    deleteGame(id) {
-        const index = this.games.findIndex(g => g.id === id);
-        if (index !== -1) {
-            this.deletedGame = this.games[index];
-            this.games.splice(index, 1);
-            this.saveToStorage();
-            renderGames();
-            renderAvailableGames();
-            showToast('Game verwijderd. Klik om ongedaan te maken.', 'error', true);
+    async updateGame(id, updates) {
+        try {
+            if (supabaseClient) {
+                // Update in Supabase
+                const { data, error } = await supabaseClient
+                    .from('games')
+                    .update({
+                        position: updates.position || '',
+                        invariant: updates.invariant || '',
+                        task_player_a: updates.taskPlayerA || '',
+                        task_player_b: updates.taskPlayerB || '',
+                        differentiation: updates.differentiation || ''
+                    })
+                    .eq('id', id)
+                    .select()
+                    .single();
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Update local array
+                const index = this.games.findIndex(g => g.id === id);
+                if (index !== -1) {
+                    this.games[index] = {
+                        id: data.id,
+                        position: data.position || '',
+                        invariant: data.invariant || '',
+                        taskPlayerA: data.task_player_a || '',
+                        taskPlayerB: data.task_player_b || '',
+                        differentiation: data.differentiation || '',
+                        createdAt: data.created_at,
+                        updatedAt: data.updated_at
+                    };
+                    await this.saveToStorage();
+                    renderGames();
+                    renderAvailableGames();
+                }
+            } else {
+                // Fallback to localStorage
+                const index = this.games.findIndex(g => g.id === id);
+                if (index !== -1) {
+                    this.games[index] = {
+                        ...this.games[index],
+                        ...updates,
+                        updatedAt: new Date().toISOString()
+                    };
+                    await this.saveToStorage();
+                    renderGames();
+                    renderAvailableGames();
+                }
+            }
+        } catch (e) {
+            console.error('Error updating game:', e);
+            showToast('Fout bij bijwerken van game', 'error');
         }
     }
 
-    undoDelete() {
+    async deleteGame(id) {
+        try {
+            if (supabaseClient) {
+                // Delete from Supabase
+                const { error } = await supabaseClient
+                    .from('games')
+                    .delete()
+                    .eq('id', id);
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Remove from local array
+                const index = this.games.findIndex(g => g.id === id);
+                if (index !== -1) {
+                    this.deletedGame = this.games[index];
+                    this.games.splice(index, 1);
+                    await this.saveToStorage();
+                    renderGames();
+                    renderAvailableGames();
+                    showToast('Game verwijderd. Klik om ongedaan te maken.', 'error', true);
+                }
+            } else {
+                // Fallback to localStorage
+                const index = this.games.findIndex(g => g.id === id);
+                if (index !== -1) {
+                    this.deletedGame = this.games[index];
+                    this.games.splice(index, 1);
+                    await this.saveToStorage();
+                    renderGames();
+                    renderAvailableGames();
+                    showToast('Game verwijderd. Klik om ongedaan te maken.', 'error', true);
+                }
+            }
+        } catch (e) {
+            console.error('Error deleting game:', e);
+            showToast('Fout bij verwijderen van game', 'error');
+        }
+    }
+
+    async undoDelete() {
         if (this.deletedGame) {
-            this.games.unshift(this.deletedGame);
+            await this.addGame(this.deletedGame);
             this.deletedGame = null;
-            this.saveToStorage();
-            renderGames();
-            renderAvailableGames();
             showToast('Verwijdering ongedaan gemaakt', 'success');
         }
     }
@@ -266,84 +428,242 @@ class LessonManager {
         this.selectedGames = [];
         this.undoTimeout = null;
         this.deletedLesson = null;
+        this.loading = false;
         this.init();
     }
 
-    init() {
-        this.loadLessons();
+    async init() {
+        await this.loadLessons();
     }
 
-    loadLessons() {
+    async loadLessons() {
+        this.loading = true;
+        try {
+            if (supabaseClient) {
+                // Load from Supabase
+                const { data, error } = await supabaseClient
+                    .from('lessons')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+                
+                if (error) {
+                    console.error('Error loading lessons from Supabase:', error);
+                    // Fallback to localStorage
+                    this.loadLessonsFromLocalStorage();
+                } else {
+                    // Convert database format to app format
+                    this.lessons = (data || []).map(lesson => ({
+                        id: lesson.id,
+                        name: lesson.name || '',
+                        description: lesson.description || '',
+                        duration: lesson.duration ? lesson.duration.toString() : '',
+                        level: lesson.level || '',
+                        notes: lesson.notes || '',
+                        gameIds: lesson.game_ids || [],
+                        createdAt: lesson.created_at,
+                        updatedAt: lesson.updated_at
+                    }));
+                    updateStats();
+                }
+            } else {
+                this.loadLessonsFromLocalStorage();
+            }
+        } catch (e) {
+            console.error('Error loading lessons:', e);
+            this.loadLessonsFromLocalStorage();
+        } finally {
+            this.loading = false;
+        }
+    }
+
+    loadLessonsFromLocalStorage() {
         const stored = localStorage.getItem('bjjLessons');
         if (stored) {
             try {
                 this.lessons = JSON.parse(stored);
-                // Validate loaded data
                 if (!Array.isArray(this.lessons)) {
                     this.lessons = [];
                 }
             } catch (e) {
-                console.error('Error loading lessons:', e);
+                console.error('Error parsing localStorage:', e);
                 this.lessons = [];
             }
         }
     }
 
-    saveToStorage() {
+    async saveToStorage() {
         try {
-            localStorage.setItem('bjjLessons', JSON.stringify(this.lessons));
-            localStorage.setItem('lastSaved', new Date().toISOString());
-            updateStats();
-            showToast('Lessen opgeslagen!', 'success');
+            if (supabaseClient) {
+                // Sync to Supabase
+                localStorage.setItem('lastSaved', new Date().toISOString());
+                updateStats();
+                showToast('Lessen opgeslagen!', 'success');
+            } else {
+                // Fallback to localStorage
+                localStorage.setItem('bjjLessons', JSON.stringify(this.lessons));
+                localStorage.setItem('lastSaved', new Date().toISOString());
+                updateStats();
+                showToast('Lessen opgeslagen!', 'success');
+            }
         } catch (e) {
             console.error('Error saving lessons:', e);
             showToast('Fout bij opslaan van lessen', 'error');
         }
     }
 
-    generateId() {
-        return Date.now().toString(36) + Math.random().toString(36).substring(2);
-    }
-
-    addLesson(lesson) {
-        lesson.id = this.generateId();
-        lesson.createdAt = new Date().toISOString();
-        lesson.updatedAt = new Date().toISOString();
-        this.lessons.unshift(lesson);
-        this.saveToStorage();
-        renderLessons();
-    }
-
-    updateLesson(id, updates) {
-        const index = this.lessons.findIndex(l => l.id === id);
-        if (index !== -1) {
-            this.lessons[index] = {
-                ...this.lessons[index],
-                ...updates,
-                updatedAt: new Date().toISOString()
-            };
-            this.saveToStorage();
-            renderLessons();
+    async addLesson(lesson) {
+        try {
+            if (supabaseClient) {
+                // Save to Supabase
+                const { data, error } = await supabaseClient
+                    .from('lessons')
+                    .insert({
+                        name: lesson.name || '',
+                        description: lesson.description || '',
+                        duration: lesson.duration ? parseInt(lesson.duration) : null,
+                        level: lesson.level || '',
+                        notes: lesson.notes || '',
+                        game_ids: lesson.gameIds || []
+                    })
+                    .select()
+                    .single();
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Convert to app format
+                const newLesson = {
+                    id: data.id,
+                    name: data.name || '',
+                    description: data.description || '',
+                    duration: data.duration ? data.duration.toString() : '',
+                    level: data.level || '',
+                    notes: data.notes || '',
+                    gameIds: data.game_ids || [],
+                    createdAt: data.created_at,
+                    updatedAt: data.updated_at
+                };
+                
+                this.lessons.unshift(newLesson);
+                await this.saveToStorage();
+                renderLessons();
+            } else {
+                // Fallback to localStorage
+                lesson.id = Date.now().toString(36) + Math.random().toString(36).substring(2);
+                lesson.createdAt = new Date().toISOString();
+                lesson.updatedAt = new Date().toISOString();
+                this.lessons.unshift(lesson);
+                await this.saveToStorage();
+                renderLessons();
+            }
+        } catch (e) {
+            console.error('Error adding lesson:', e);
+            showToast('Fout bij toevoegen van les', 'error');
         }
     }
 
-    deleteLesson(id) {
-        const index = this.lessons.findIndex(l => l.id === id);
-        if (index !== -1) {
-            this.deletedLesson = this.lessons[index];
-            this.lessons.splice(index, 1);
-            this.saveToStorage();
-            renderLessons();
-            showToast('Les verwijderd. Klik om ongedaan te maken.', 'error', true);
+    async updateLesson(id, updates) {
+        try {
+            if (supabaseClient) {
+                // Update in Supabase
+                const { data, error } = await supabaseClient
+                    .from('lessons')
+                    .update({
+                        name: updates.name || '',
+                        description: updates.description || '',
+                        duration: updates.duration ? parseInt(updates.duration) : null,
+                        level: updates.level || '',
+                        notes: updates.notes || '',
+                        game_ids: updates.gameIds || []
+                    })
+                    .eq('id', id)
+                    .select()
+                    .single();
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Update local array
+                const index = this.lessons.findIndex(l => l.id === id);
+                if (index !== -1) {
+                    this.lessons[index] = {
+                        id: data.id,
+                        name: data.name || '',
+                        description: data.description || '',
+                        duration: data.duration ? data.duration.toString() : '',
+                        level: data.level || '',
+                        notes: data.notes || '',
+                        gameIds: data.game_ids || [],
+                        createdAt: data.created_at,
+                        updatedAt: data.updated_at
+                    };
+                    await this.saveToStorage();
+                    renderLessons();
+                }
+            } else {
+                // Fallback to localStorage
+                const index = this.lessons.findIndex(l => l.id === id);
+                if (index !== -1) {
+                    this.lessons[index] = {
+                        ...this.lessons[index],
+                        ...updates,
+                        updatedAt: new Date().toISOString()
+                    };
+                    await this.saveToStorage();
+                    renderLessons();
+                }
+            }
+        } catch (e) {
+            console.error('Error updating lesson:', e);
+            showToast('Fout bij bijwerken van les', 'error');
         }
     }
 
-    undoDelete() {
+    async deleteLesson(id) {
+        try {
+            if (supabaseClient) {
+                // Delete from Supabase
+                const { error } = await supabaseClient
+                    .from('lessons')
+                    .delete()
+                    .eq('id', id);
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Remove from local array
+                const index = this.lessons.findIndex(l => l.id === id);
+                if (index !== -1) {
+                    this.deletedLesson = this.lessons[index];
+                    this.lessons.splice(index, 1);
+                    await this.saveToStorage();
+                    renderLessons();
+                    showToast('Les verwijderd. Klik om ongedaan te maken.', 'error', true);
+                }
+            } else {
+                // Fallback to localStorage
+                const index = this.lessons.findIndex(l => l.id === id);
+                if (index !== -1) {
+                    this.deletedLesson = this.lessons[index];
+                    this.lessons.splice(index, 1);
+                    await this.saveToStorage();
+                    renderLessons();
+                    showToast('Les verwijderd. Klik om ongedaan te maken.', 'error', true);
+                }
+            }
+        } catch (e) {
+            console.error('Error deleting lesson:', e);
+            showToast('Fout bij verwijderen van les', 'error');
+        }
+    }
+
+    async undoDelete() {
         if (this.deletedLesson) {
-            this.lessons.unshift(this.deletedLesson);
+            await this.addLesson(this.deletedLesson);
             this.deletedLesson = null;
-            this.saveToStorage();
-            renderLessons();
             showToast('Verwijdering ongedaan gemaakt', 'success');
         }
     }
@@ -786,7 +1106,7 @@ function validateGame(game) {
     return { valid: true };
 }
 
-function saveGame() {
+async function saveGame() {
     const game = {
         position: sanitizeInput(document.getElementById('modalPosition').value),
         invariant: sanitizeInput(document.getElementById('modalInvariant').value),
@@ -802,9 +1122,9 @@ function saveGame() {
     }
 
     if (gameManager.currentEditId) {
-        gameManager.updateGame(gameManager.currentEditId, game);
+        await gameManager.updateGame(gameManager.currentEditId, game);
     } else {
-        gameManager.addGame(game);
+        await gameManager.addGame(game);
     }
 
     closeModal('gameModal');
@@ -817,7 +1137,7 @@ async function deleteGame() {
             'Game verwijderen'
         );
         if (confirmed) {
-            gameManager.deleteGame(gameManager.currentEditId);
+            await gameManager.deleteGame(gameManager.currentEditId);
             closeModal('gameModal');
         }
     }
@@ -855,7 +1175,7 @@ function validateLesson(lesson) {
     return { valid: true };
 }
 
-function saveLesson() {
+async function saveLesson() {
     const durationValue = document.getElementById('lessonDuration').value.trim();
     const duration = durationValue ? parseInt(durationValue) : null;
     
@@ -875,9 +1195,9 @@ function saveLesson() {
     }
 
     if (lessonManager.currentEditId) {
-        lessonManager.updateLesson(lessonManager.currentEditId, lesson);
+        await lessonManager.updateLesson(lessonManager.currentEditId, lesson);
     } else {
-        lessonManager.addLesson(lesson);
+        await lessonManager.addLesson(lesson);
     }
 
     clearLesson();
@@ -1006,7 +1326,7 @@ async function deleteLesson() {
             'Les verwijderen'
         );
         if (confirmed) {
-            lessonManager.deleteLesson(lessonManager.currentViewId);
+            await lessonManager.deleteLesson(lessonManager.currentViewId);
             closeModal('lessonModal');
         }
     }
@@ -1182,9 +1502,9 @@ async function bulkDeleteGames() {
     );
     
     if (confirmed) {
-        selectedGameIds.forEach(id => {
-            gameManager.deleteGame(id);
-        });
+        for (const id of selectedGameIds) {
+            await gameManager.deleteGame(id);
+        }
         selectedGameIds.clear();
         toggleBulkSelect();
         showToast(`${count} games verwijderd`, 'success');
@@ -1459,10 +1779,26 @@ async function importAll(event) {
                 );
                 
                 if (confirmed) {
-                    gameManager.games = Array.isArray(imported.games) ? imported.games : [];
-                    lessonManager.lessons = Array.isArray(imported.lessons) ? imported.lessons : [];
-                    gameManager.saveToStorage();
-                    lessonManager.saveToStorage();
+                    // Import games
+                    if (Array.isArray(imported.games) && imported.games.length > 0) {
+                        for (const game of imported.games) {
+                            // Remove id and timestamps to create new entries
+                            const { id, createdAt, updatedAt, ...gameData } = game;
+                            await gameManager.addGame(gameData);
+                        }
+                    }
+                    
+                    // Import lessons
+                    if (Array.isArray(imported.lessons) && imported.lessons.length > 0) {
+                        for (const lesson of imported.lessons) {
+                            // Remove id and timestamps to create new entries
+                            const { id, createdAt, updatedAt, ...lessonData } = lesson;
+                            await lessonManager.addLesson(lessonData);
+                        }
+                    }
+                    
+                    await gameManager.loadGames();
+                    await lessonManager.loadLessons();
                     renderGames();
                     renderLessons();
                     renderAvailableGames();
@@ -1476,8 +1812,14 @@ async function importAll(event) {
                     'Games importeren'
                 );
                 if (confirmed) {
-                    gameManager.games = imported;
-                    gameManager.saveToStorage();
+                    // Import games one by one to Supabase
+                    for (const game of imported) {
+                        // Remove id and timestamps to create new entries
+                        const { id, createdAt, updatedAt, ...gameData } = game;
+                        await gameManager.addGame(gameData);
+                    }
+                    
+                    await gameManager.loadGames();
                     renderGames();
                     renderAvailableGames();
                     showToast(`${imported.length} games geïmporteerd`, 'success');
@@ -1588,7 +1930,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
     
-    // Initialize
+    // Initialize Supabase client
+    try {
+        // Supabase is loaded via CDN and available as global 'supabase'
+        if (typeof supabase !== 'undefined' && supabase.createClient) {
+            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            console.log('✅ Supabase client geïnitialiseerd');
+        } else {
+            console.warn('Supabase library niet geladen, gebruik localStorage als fallback');
+            supabaseClient = null;
+        }
+    } catch (e) {
+        console.error('Fout bij initialiseren Supabase:', e);
+        supabaseClient = null;
+    }
+    
+    // Initialize managers (they will load data asynchronously)
     loadTheme();
     renderGames();
     updateStats();

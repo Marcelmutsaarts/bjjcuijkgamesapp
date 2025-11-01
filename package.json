@@ -1,0 +1,14 @@
+{
+  "name": "bjjcuijk-games-app",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "BJJ Games & Lessen Management App",
+  "main": "test-supabase.js",
+  "scripts": {
+    "test": "node test-supabase.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "dotenv": "^16.3.1"
+  }
+}
