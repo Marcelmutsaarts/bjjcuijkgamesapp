@@ -8,9 +8,9 @@ const CONSTANTS = {
     SEARCH_DEBOUNCE: 300
 };
 
-// Supabase Configuration
-const SUPABASE_URL = 'https://hgmnpvmabvtztdwovndd.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhnbW5wdm1hYnZ0enRkd292bmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5ODk2MTYsImV4cCI6MjA3NzU2NTYxNn0.9q7qng21H58g_eJ3mZBLl93HL0ZEtzfgXdm-MGZe5RI';
+// Supabase Configuration - read from environment variables or window variables
+const SUPABASE_URL = window.SUPABASE_URL || 'https://hgmnpvmabvtztdwovndd.supabase.co';
+const SUPABASE_ANON_KEY = window.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImhnbW5wdm1hYnZ0enRkd292bmRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5ODk2MTYsImV4cCI6MjA3NzU2NTYxNn0.9q7qng21H58g_eJ3mZBLl93HL0ZEtzfgXdm-MGZe5RI';
 
 // Initialize Supabase client (will be initialized after DOM loads)
 let supabaseClient = null;
@@ -88,7 +88,14 @@ class GameManager {
                     .order('created_at', { ascending: false });
                 
                 if (error) {
-                    console.error('Error loading games from Supabase:', error);
+                    console.error('❌ Error loading games from Supabase:', error);
+                    console.error('Error details:', {
+                        message: error.message,
+                        code: error.code,
+                        details: error.details,
+                        hint: error.hint
+                    });
+                    showToast(`Fout bij laden games: ${error.message}`, 'error');
                     // Fallback to localStorage
                     this.loadGamesFromLocalStorage();
                 } else {
@@ -198,8 +205,10 @@ class GameManager {
                 renderAvailableGames();
             }
         } catch (e) {
-            console.error('Error adding game:', e);
-            showToast('Fout bij toevoegen van game', 'error');
+            console.error('❌ Error adding game:', e);
+            const errorMsg = e?.message || e?.error?.message || 'Onbekende fout';
+            console.error('Error details:', e);
+            showToast(`Fout bij toevoegen: ${errorMsg}`, 'error');
         }
     }
 
@@ -256,8 +265,10 @@ class GameManager {
                 }
             }
         } catch (e) {
-            console.error('Error updating game:', e);
-            showToast('Fout bij bijwerken van game', 'error');
+            console.error('❌ Error updating game:', e);
+            const errorMsg = e?.message || e?.error?.message || 'Onbekende fout';
+            console.error('Error details:', e);
+            showToast(`Fout bij bijwerken: ${errorMsg}`, 'error');
         }
     }
 
@@ -297,8 +308,10 @@ class GameManager {
                 }
             }
         } catch (e) {
-            console.error('Error deleting game:', e);
-            showToast('Fout bij verwijderen van game', 'error');
+            console.error('❌ Error deleting game:', e);
+            const errorMsg = e?.message || e?.error?.message || 'Onbekende fout';
+            console.error('Error details:', e);
+            showToast(`Fout bij verwijderen: ${errorMsg}`, 'error');
         }
     }
 
@@ -1934,14 +1947,25 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
         // Supabase is loaded via CDN and available as global 'supabase'
         if (typeof supabase !== 'undefined' && supabase.createClient) {
-            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            console.log('✅ Supabase client geïnitialiseerd');
+            if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+                console.error('❌ Supabase credentials ontbreken:', { 
+                    hasUrl: !!SUPABASE_URL, 
+                    hasKey: !!SUPABASE_ANON_KEY 
+                });
+                supabaseClient = null;
+            } else {
+                supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+                console.log('✅ Supabase client geïnitialiseerd', { 
+                    url: SUPABASE_URL.substring(0, 30) + '...',
+                    hasKey: !!SUPABASE_ANON_KEY 
+                });
+            }
         } else {
-            console.warn('Supabase library niet geladen, gebruik localStorage als fallback');
+            console.warn('⚠️ Supabase library niet geladen, gebruik localStorage als fallback');
             supabaseClient = null;
         }
     } catch (e) {
-        console.error('Fout bij initialiseren Supabase:', e);
+        console.error('❌ Fout bij initialiseren Supabase:', e);
         supabaseClient = null;
     }
     

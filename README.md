@@ -1,57 +1,65 @@
-# BJJCuijk Games & Lessen App
+# BJJ Games & Lessen App
 
-Een web-applicatie voor het beheren van BJJ (Brazilian Jiu-Jitsu) ecological task constraint games en het samenstellen van lessen.
+## Vercel Deployment
 
-## 🥋 Features
+### Stap 1: Environment Variables instellen in Vercel
 
-- **Games Beheer**: Maak, bewerk, verwijder en zoek BJJ games
-- **Les Samenstellen**: Stel lessen samen door games te selecteren en ordenen
-- **Drag & Drop**: Verander eenvoudig de volgorde van games in een les
-- **Import/Export**: Backup en deel je games en lessen via JSON
-- **100% Offline**: Werkt volledig in je browser, geen server nodig
-- **Print-vriendelijk**: Print lessen voor gebruik tijdens trainingen
+Ga naar je Vercel project instellingen en voeg de volgende environment variables toe:
 
-## 🚀 Gebruik
+- `SUPABASE_URL` - Je Supabase project URL
+- `SUPABASE_ANON_KEY` - Je Supabase anonymous key
 
-### Online (GitHub Pages)
-Bezoek: [https://marcelmutsaarts.github.io/bjjcuijkgamesapp/app.html](https://marcelmutsaarts.github.io/bjjcuijkgamesapp/app.html)
+### Stap 2: Deploy
 
-### Lokaal
-1. Download `app.html`
-2. Open het bestand in je browser
-3. Klaar om te gebruiken!
+Vercel zal automatisch de build script uitvoeren die de environment variables injecteert in `index.html`.
 
-## 📱 Features in Detail
+### Stap 3: Troubleshooting
 
-### Games
-- **Positie**: De startpositie (bijv. Guard, Mount, Side Control)
-- **Invariant**: De constante regel die tijdens de game geldt
-- **Opdracht Speler A & B**: Specifieke taken voor elke speler
-- **Differentiatie**: Aanpassingen voor verschillende niveaus
+Als je "Fout bij..." berichten ziet:
 
-### Lessen
-- Combineer meerdere games tot een gestructureerde les
-- Voeg beschrijving, duur, niveau en notities toe
-- Sleep games om de volgorde aan te passen
-- Print de les voor gebruik op de mat
+1. **Controleer de browser console** (F12) voor gedetailleerde error messages
+2. **Verifieer dat de environment variables correct zijn ingesteld** in Vercel
+3. **Controleer Supabase Row Level Security (RLS) policies**:
+   - Ga naar Supabase Dashboard → Table Editor → `games` en `lessons`
+   - Zorg dat RLS policies zijn ingesteld zodat `anon` gebruikers kunnen:
+     - SELECT (lezen)
+     - INSERT (toevoegen)
+     - UPDATE (bijwerken)
+     - DELETE (verwijderen)
 
-## 💾 Data Opslag
+### Voorbeeld RLS Policy (via SQL Editor in Supabase):
 
-Alle data wordt lokaal opgeslagen in je browser (localStorage). 
-- Export regelmatig naar JSON voor backup
-- Import JSON bestanden om data te herstellen of delen
+```sql
+-- Voor games tabel
+ALTER TABLE games ENABLE ROW LEVEL SECURITY;
 
-## 🛠️ Technologie
+CREATE POLICY "Allow all operations for anon users" ON games
+FOR ALL
+TO anon
+USING (true)
+WITH CHECK (true);
 
-- Pure HTML/CSS/JavaScript
-- Geen frameworks of dependencies
-- Werkt in alle moderne browsers
-- Mobile-friendly responsive design
+-- Voor lessons tabel
+ALTER TABLE lessons ENABLE ROW LEVEL SECURITY;
 
-## 📄 Licentie
+CREATE POLICY "Allow all operations for anon users" ON lessons
+FOR ALL
+TO anon
+USING (true)
+WITH CHECK (true);
+```
 
-Vrij te gebruiken voor BJJCuijk en andere BJJ scholen.
+### Lokale ontwikkeling
 
----
+Voor lokale ontwikkeling:
+1. Maak een `.env.local` bestand met:
+   ```
+   SUPABASE_URL=je_supabase_url
+   SUPABASE_ANON_KEY=je_supabase_anon_key
+   ```
+2. Run `npm run build` om de environment variables te injecteren
+3. Open `index.html` in je browser of gebruik een local server
 
-Gemaakt met ❤️ voor de BJJ community
+### Build Script
+
+Het `build.js` script vervangt `%%SUPABASE_URL%%` en `%%SUPABASE_ANON_KEY%%` placeholders in `index.html` met de environment variables tijdens build time.

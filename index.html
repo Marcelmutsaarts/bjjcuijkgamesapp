@@ -271,6 +271,12 @@
 
     <div class="toast" id="toast" role="alert" aria-live="polite"></div>
 
+    <!-- Supabase Configuration from Environment Variables -->
+    <script>
+        // Inject environment variables as window variables for browser access
+        window.SUPABASE_URL = '%%SUPABASE_URL%%';
+        window.SUPABASE_ANON_KEY = '%%SUPABASE_ANON_KEY%%';
+    </script>
     <!-- Supabase Client -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="app.js"></script>
