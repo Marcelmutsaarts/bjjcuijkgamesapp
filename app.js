@@ -107,6 +107,7 @@ class GameManager {
                     // Convert database format to app format
                     this.games = (data || []).map(game => ({
                         id: game.id,
+                        name: game.name || '',
                         position: game.position || '',
                         invariant: game.invariant || '',
                         taskPlayerA: game.task_player_a || '',
@@ -173,6 +174,7 @@ class GameManager {
                 const { data, error } = await supabaseClient
                     .from('games')
                     .insert({
+                        name: game.name || '',
                         position: game.position || '',
                         invariant: game.invariant || '',
                         task_player_a: game.taskPlayerA || '',
@@ -198,6 +200,7 @@ class GameManager {
                 // Convert to app format
                 const newGame = {
                     id: data.id,
+                    name: data.name || '',
                     position: data.position || '',
                     invariant: data.invariant || '',
                     taskPlayerA: data.task_player_a || '',
@@ -237,9 +240,10 @@ class GameManager {
         try {
             if (supabaseClient) {
                 // Update in Supabase
-                const { data, error } = await supabaseClient
+                const { data, error} = await supabaseClient
                     .from('games')
                     .update({
+                        name: updates.name || '',
                         position: updates.position || '',
                         invariant: updates.invariant || '',
                         task_player_a: updates.taskPlayerA || '',
@@ -259,6 +263,7 @@ class GameManager {
                 if (index !== -1) {
                     this.games[index] = {
                         id: data.id,
+                        name: data.name || '',
                         position: data.position || '',
                         invariant: data.invariant || '',
                         taskPlayerA: data.task_player_a || '',
@@ -352,6 +357,7 @@ class GameManager {
             const term = searchTerm.toLowerCase();
             filtered = filtered.filter(game => {
                 return (
+                    (game.name || '').toLowerCase().includes(term) ||
                     (game.position || '').toLowerCase().includes(term) ||
                     (game.invariant || '').toLowerCase().includes(term) ||
                     (game.taskPlayerA || '').toLowerCase().includes(term) ||
@@ -842,24 +848,30 @@ function renderGames() {
 
     container.innerHTML = filtered.map(game => {
         const safeId = escapeHtml(game.id);
+        const safeName = highlightSearch(game.name || '', searchTerm);
         const safePosition = highlightSearch(game.position || 'Geen positie', searchTerm);
         const safeInvariant = highlightSearch(game.invariant || 'Geen invariant opgegeven', searchTerm);
         const isSelected = selectedGameIds.has(game.id);
         const checkboxHtml = bulkSelectMode ? `
-            <input type="checkbox" class="game-card-checkbox" ${isSelected ? 'checked' : ''} 
+            <input type="checkbox" class="game-card-checkbox" ${isSelected ? 'checked' : ''}
                    onchange="toggleGameSelection('${safeId}')" aria-label="Selecteer game">
         ` : '';
-        
-        const clickHandler = bulkSelectMode 
+
+        const clickHandler = bulkSelectMode
             ? `onclick="toggleGameSelection('${safeId}')"`
             : `onclick="editGame('${safeId}')"`;
-        
+
         const cardClass = `game-card ${bulkSelectMode ? 'checkbox-mode' : ''} ${isSelected ? 'selected' : ''}`;
-        
+
+        // Show name as title if available, otherwise use position
+        const displayTitle = game.name ? safeName : safePosition;
+        const displaySubtitle = game.name ? `<div class="game-subtitle">${safePosition}</div>` : '';
+
         return `
-            <div class="${cardClass}" ${clickHandler} role="button" tabindex="0" aria-label="${bulkSelectMode ? 'Selecteer' : 'Bewerk'} game: ${escapeHtml(game.position || 'Geen positie')}">
+            <div class="${cardClass}" ${clickHandler} role="button" tabindex="0" aria-label="${bulkSelectMode ? 'Selecteer' : 'Bewerk'} game: ${escapeHtml(game.name || game.position || 'Geen positie')}">
                 ${checkboxHtml}
-                <div class="game-position">${safePosition}</div>
+                <div class="game-position">${displayTitle}</div>
+                ${displaySubtitle}
                 <div class="game-preview">${safeInvariant}</div>
             </div>
         `;
@@ -1087,6 +1099,7 @@ function handleDragEnd(e) {
 function openNewGameModal() {
     gameManager.currentEditId = null;
     document.getElementById('modalTitle').textContent = 'Nieuwe Game';
+    document.getElementById('modalName').value = '';
     document.getElementById('modalPosition').value = '';
     document.getElementById('modalInvariant').value = '';
     document.getElementById('modalTaskA').value = '';
@@ -1112,6 +1125,7 @@ function editGame(id) {
     
     gameManager.currentEditId = id;
     document.getElementById('modalTitle').textContent = 'Game Bewerken';
+    document.getElementById('modalName').value = game.name || '';
     document.getElementById('modalPosition').value = game.position || '';
     document.getElementById('modalInvariant').value = game.invariant || '';
     document.getElementById('modalTaskA').value = game.taskPlayerA || '';
@@ -1142,6 +1156,7 @@ function validateGame(game) {
 
 async function saveGame() {
     const game = {
+        name: sanitizeInput(document.getElementById('modalName').value),
         position: sanitizeInput(document.getElementById('modalPosition').value),
         invariant: sanitizeInput(document.getElementById('modalInvariant').value),
         taskPlayerA: sanitizeInput(document.getElementById('modalTaskA').value),

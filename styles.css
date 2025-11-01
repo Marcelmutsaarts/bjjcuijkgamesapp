@@ -414,6 +414,17 @@ header p {
     transition: color 0.3s ease;
 }
 
+.game-subtitle {
+    font-size: 1rem;
+    color: var(--dark);
+    margin-bottom: 8px;
+    opacity: 0.8;
+}
+
+[data-theme="dark"] .game-subtitle {
+    color: var(--light);
+}
+
 .game-preview, .lesson-preview {
     color: #7f8c8d;
     font-size: 0.95rem;
