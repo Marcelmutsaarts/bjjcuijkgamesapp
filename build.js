@@ -1,5 +1,13 @@
 const fs = require('fs');
 const path = require('path');
+const dotenv = require('dotenv');
+
+// Load .env.local if it exists
+const envLocalPath = path.join(__dirname, '.env.local');
+if (fs.existsSync(envLocalPath)) {
+    dotenv.config({ path: envLocalPath });
+    console.log('📁 Loaded .env.local');
+}
 
 // Read environment variables
 const SUPABASE_URL = process.env.SUPABASE_URL || '';
