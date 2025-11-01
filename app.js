@@ -1788,7 +1788,16 @@ function exportAll() {
 async function refreshData() {
     try {
         setLoadingState(true);
-        showToast('Data wordt vernieuwd...', 'info');
+        showToast('Data wordt geladen uit database...', 'info');
+        console.log('🔄 Laad data uit Supabase...');
+        
+        // Check if Supabase client is available
+        if (!supabaseClient) {
+            console.error('❌ Supabase client niet beschikbaar!');
+            showToast('Supabase niet beschikbaar. Controleer console voor details.', 'error');
+            setLoadingState(false);
+            return;
+        }
         
         // Reload data from Supabase
         await Promise.all([
@@ -1803,11 +1812,12 @@ async function refreshData() {
         updateStats();
         updatePositionFilter();
         
-        showToast('Data vernieuwd!', 'success');
+        console.log(`✅ Data geladen: ${gameManager.games.length} games, ${lessonManager.lessons.length} lessen`);
+        showToast(`Data geladen: ${gameManager.games.length} games, ${lessonManager.lessons.length} lessen`, 'success');
         setTimeout(() => setLoadingState(false), 500);
     } catch (e) {
-        console.error('Error refreshing data:', e);
-        showToast('Fout bij vernieuwen', 'error');
+        console.error('❌ Error refreshing data:', e);
+        showToast(`Fout bij laden: ${e.message}`, 'error');
         setLoadingState(false);
     }
 }
