@@ -1,0 +1,1624 @@
+// Constants
+const CONSTANTS = {
+    MAX_TEXT_LENGTH: 5000,
+    MAX_DURATION: 600,
+    MIN_DURATION: 1,
+    TOAST_DURATION: 3000,
+    UNDO_TIMEOUT: 5000,
+    SEARCH_DEBOUNCE: 300
+};
+
+// Utility functions
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function escapeRegex(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function sanitizeInput(text, maxLength = CONSTANTS.MAX_TEXT_LENGTH) {
+    if (!text) return '';
+    const trimmed = text.trim();
+    return trimmed.length > maxLength ? trimmed.substring(0, maxLength) : trimmed;
+}
+
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
+}
+
+// Safe text rendering with highlight
+function highlightSearch(text, searchTerm) {
+    if (!text) return '';
+    if (!searchTerm) return escapeHtml(text);
+    
+    const escapedText = escapeHtml(text);
+    const escapedSearch = escapeRegex(searchTerm);
+    
+    try {
+        const regex = new RegExp(`(${escapedSearch})`, 'gi');
+        return escapedText.replace(regex, '<span class="highlight">$1</span>');
+    } catch (e) {
+        console.error('Regex error:', e);
+        return escapedText;
+    }
+}
+
+// Data Management Classes
+class GameManager {
+    constructor() {
+        this.games = [];
+        this.currentEditId = null;
+        this.searchTerm = '';
+        this.undoTimeout = null;
+        this.deletedGame = null;
+        this.init();
+    }
+
+    init() {
+        this.loadGames();
+    }
+
+    loadGames() {
+        const stored = localStorage.getItem('bjjGames');
+        if (stored) {
+            try {
+                this.games = JSON.parse(stored);
+                // Validate loaded data
+                if (!Array.isArray(this.games)) {
+                    this.games = [];
+                }
+            } catch (e) {
+                console.error('Error loading games:', e);
+                this.games = [];
+            }
+        }
+    }
+
+    saveToStorage() {
+        try {
+            localStorage.setItem('bjjGames', JSON.stringify(this.games));
+            localStorage.setItem('lastSaved', new Date().toISOString());
+            updateStats();
+            showToast('Games opgeslagen!', 'success');
+        } catch (e) {
+            console.error('Error saving games:', e);
+            showToast('Fout bij opslaan van games', 'error');
+        }
+    }
+
+    generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).substring(2);
+    }
+
+    addGame(game) {
+        game.id = this.generateId();
+        game.createdAt = new Date().toISOString();
+        game.updatedAt = new Date().toISOString();
+        this.games.unshift(game);
+        this.saveToStorage();
+        renderGames();
+        renderAvailableGames();
+    }
+
+    updateGame(id, updates) {
+        const index = this.games.findIndex(g => g.id === id);
+        if (index !== -1) {
+            this.games[index] = {
+                ...this.games[index],
+                ...updates,
+                updatedAt: new Date().toISOString()
+            };
+            this.saveToStorage();
+            renderGames();
+            renderAvailableGames();
+        }
+    }
+
+    deleteGame(id) {
+        const index = this.games.findIndex(g => g.id === id);
+        if (index !== -1) {
+            this.deletedGame = this.games[index];
+            this.games.splice(index, 1);
+            this.saveToStorage();
+            renderGames();
+            renderAvailableGames();
+            showToast('Game verwijderd. Klik om ongedaan te maken.', 'error', true);
+        }
+    }
+
+    undoDelete() {
+        if (this.deletedGame) {
+            this.games.unshift(this.deletedGame);
+            this.deletedGame = null;
+            this.saveToStorage();
+            renderGames();
+            renderAvailableGames();
+            showToast('Verwijdering ongedaan gemaakt', 'success');
+        }
+    }
+
+    getFilteredGames(searchTerm = '', filterPosition = '', sortBy = 'newest') {
+        let filtered = this.games;
+        
+        // Filter by search term
+        if (searchTerm) {
+            const term = searchTerm.toLowerCase();
+            filtered = filtered.filter(game => {
+                return (
+                    (game.position || '').toLowerCase().includes(term) ||
+                    (game.invariant || '').toLowerCase().includes(term) ||
+                    (game.taskPlayerA || '').toLowerCase().includes(term) ||
+                    (game.taskPlayerB || '').toLowerCase().includes(term) ||
+                    (game.differentiation || '').toLowerCase().includes(term)
+                );
+            });
+        }
+        
+        // Filter by position
+        if (filterPosition) {
+            filtered = filtered.filter(game => {
+                return (game.position || '').toLowerCase().includes(filterPosition.toLowerCase());
+            });
+        }
+        
+        // Sort
+        filtered = [...filtered];
+        switch(sortBy) {
+            case 'oldest':
+                filtered.sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+                break;
+            case 'position':
+                filtered.sort((a, b) => {
+                    const posA = (a.position || '').toLowerCase();
+                    const posB = (b.position || '').toLowerCase();
+                    return posA.localeCompare(posB);
+                });
+                break;
+            case 'updated':
+                filtered.sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+                break;
+            case 'newest':
+            default:
+                filtered.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+                break;
+        }
+        
+        return filtered;
+    }
+    
+    getUniquePositions() {
+        const positions = new Set();
+        this.games.forEach(game => {
+            if (game.position) {
+                const pos = game.position.trim();
+                if (pos) positions.add(pos);
+            }
+        });
+        return Array.from(positions).sort();
+    }
+
+    exportToJSON() {
+        try {
+            const dataStr = JSON.stringify(this.games, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            const exportFileDefaultName = `bjj-games-${new Date().toISOString().split('T')[0]}.json`;
+            
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+            
+            showToast(`${this.games.length} games geëxporteerd`, 'success');
+        } catch (e) {
+            console.error('Export error:', e);
+            showToast('Fout bij exporteren', 'error');
+        }
+    }
+
+    async importFromJSON(file) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const imported = JSON.parse(e.target.result);
+                if (Array.isArray(imported)) {
+                    const confirmed = await showConfirm(
+                        `Dit vervangt je huidige ${this.games.length} games met ${imported.length} geïmporteerde games. Doorgaan?`,
+                        'Games importeren'
+                    );
+                    if (confirmed) {
+                        this.games = imported;
+                        this.saveToStorage();
+                        renderGames();
+                        renderAvailableGames();
+                        showToast(`${imported.length} games geïmporteerd`, 'success');
+                    }
+                } else {
+                    throw new Error('Invalid format');
+                }
+            } catch (error) {
+                console.error('Import error:', error);
+                showToast('Fout bij importeren: ongeldig bestand', 'error');
+            }
+        };
+        reader.onerror = () => {
+            showToast('Fout bij lezen van bestand', 'error');
+        };
+        reader.readAsText(file);
+    }
+}
+
+class LessonManager {
+    constructor() {
+        this.lessons = [];
+        this.currentEditId = null;
+        this.currentViewId = null;
+        this.selectedGames = [];
+        this.undoTimeout = null;
+        this.deletedLesson = null;
+        this.init();
+    }
+
+    init() {
+        this.loadLessons();
+    }
+
+    loadLessons() {
+        const stored = localStorage.getItem('bjjLessons');
+        if (stored) {
+            try {
+                this.lessons = JSON.parse(stored);
+                // Validate loaded data
+                if (!Array.isArray(this.lessons)) {
+                    this.lessons = [];
+                }
+            } catch (e) {
+                console.error('Error loading lessons:', e);
+                this.lessons = [];
+            }
+        }
+    }
+
+    saveToStorage() {
+        try {
+            localStorage.setItem('bjjLessons', JSON.stringify(this.lessons));
+            localStorage.setItem('lastSaved', new Date().toISOString());
+            updateStats();
+            showToast('Lessen opgeslagen!', 'success');
+        } catch (e) {
+            console.error('Error saving lessons:', e);
+            showToast('Fout bij opslaan van lessen', 'error');
+        }
+    }
+
+    generateId() {
+        return Date.now().toString(36) + Math.random().toString(36).substring(2);
+    }
+
+    addLesson(lesson) {
+        lesson.id = this.generateId();
+        lesson.createdAt = new Date().toISOString();
+        lesson.updatedAt = new Date().toISOString();
+        this.lessons.unshift(lesson);
+        this.saveToStorage();
+        renderLessons();
+    }
+
+    updateLesson(id, updates) {
+        const index = this.lessons.findIndex(l => l.id === id);
+        if (index !== -1) {
+            this.lessons[index] = {
+                ...this.lessons[index],
+                ...updates,
+                updatedAt: new Date().toISOString()
+            };
+            this.saveToStorage();
+            renderLessons();
+        }
+    }
+
+    deleteLesson(id) {
+        const index = this.lessons.findIndex(l => l.id === id);
+        if (index !== -1) {
+            this.deletedLesson = this.lessons[index];
+            this.lessons.splice(index, 1);
+            this.saveToStorage();
+            renderLessons();
+            showToast('Les verwijderd. Klik om ongedaan te maken.', 'error', true);
+        }
+    }
+
+    undoDelete() {
+        if (this.deletedLesson) {
+            this.lessons.unshift(this.deletedLesson);
+            this.deletedLesson = null;
+            this.saveToStorage();
+            renderLessons();
+            showToast('Verwijdering ongedaan gemaakt', 'success');
+        }
+    }
+
+    getFilteredLessons(searchTerm = '') {
+        if (!searchTerm) return this.lessons;
+        
+        const term = searchTerm.toLowerCase();
+        return this.lessons.filter(lesson => {
+            return (
+                (lesson.name || '').toLowerCase().includes(term) ||
+                (lesson.description || '').toLowerCase().includes(term) ||
+                (lesson.level || '').toLowerCase().includes(term) ||
+                (lesson.notes || '').toLowerCase().includes(term)
+            );
+        });
+    }
+
+    exportToJSON() {
+        try {
+            const dataStr = JSON.stringify(this.lessons, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+            const exportFileDefaultName = `bjj-lessen-${new Date().toISOString().split('T')[0]}.json`;
+            
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            linkElement.click();
+            
+            showToast(`${this.lessons.length} lessen geëxporteerd`, 'success');
+        } catch (e) {
+            console.error('Export error:', e);
+            showToast('Fout bij exporteren', 'error');
+        }
+    }
+
+    async importFromJSON(file) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+            try {
+                const imported = JSON.parse(e.target.result);
+                if (Array.isArray(imported)) {
+                    const confirmed = await showConfirm(
+                        `Dit vervangt je huidige ${this.lessons.length} lessen met ${imported.length} geïmporteerde lessen. Doorgaan?`,
+                        'Lessen importeren'
+                    );
+                    if (confirmed) {
+                        this.lessons = imported;
+                        this.saveToStorage();
+                        renderLessons();
+                        showToast(`${imported.length} lessen geïmporteerd`, 'success');
+                    }
+                } else {
+                    throw new Error('Invalid format');
+                }
+            } catch (error) {
+                console.error('Import error:', error);
+                showToast('Fout bij importeren: ongeldig bestand', 'error');
+            }
+        };
+        reader.onerror = () => {
+            showToast('Fout bij lezen van bestand', 'error');
+        };
+        reader.readAsText(file);
+    }
+}
+
+// Initialize managers
+const gameManager = new GameManager();
+const lessonManager = new LessonManager();
+
+// Global state
+let bulkSelectMode = false;
+let selectedGameIds = new Set();
+let confirmResolve = null;
+
+// Tab switching with proper error handling
+function switchTab(tab, eventElement = null) {
+    try {
+        // Update nav tabs
+        document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+        
+        if (eventElement) {
+            eventElement.classList.add('active');
+        } else {
+            // Find button by tab name
+            const buttons = document.querySelectorAll('.nav-tab');
+            buttons.forEach(btn => {
+                if (btn.textContent.includes(tab === 'games' ? 'Games' : tab === 'lessons' ? 'Lessen' : 'Samenstellen')) {
+                    btn.classList.add('active');
+                }
+            });
+        }
+
+        // Update pages
+        document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        
+        switch(tab) {
+            case 'games':
+                document.getElementById('gamesPage').classList.add('active');
+                renderGames();
+                break;
+            case 'lessons':
+                document.getElementById('lessonsPage').classList.add('active');
+                renderLessons();
+                break;
+            case 'compose':
+                document.getElementById('composePage').classList.add('active');
+                renderAvailableGames();
+                break;
+            default:
+                console.error('Unknown tab:', tab);
+        }
+    } catch (e) {
+        console.error('Error switching tab:', e);
+        showToast('Fout bij wisselen van tab', 'error');
+    }
+}
+
+// Render functions with safe rendering
+function renderGames() {
+    const container = document.getElementById('gamesContainer');
+    if (!container) return;
+    
+    const searchTerm = document.getElementById('gameSearchInput')?.value || '';
+    const filterPosition = document.getElementById('gameFilterSelect')?.value || '';
+    const sortBy = document.getElementById('gameSortSelect')?.value || 'newest';
+    const filtered = gameManager.getFilteredGames(searchTerm, filterPosition, sortBy);
+    
+    // Update filter dropdown
+    updatePositionFilter();
+    
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h2>${searchTerm || filterPosition ? 'Geen resultaten' : 'Geen games'}</h2>
+                <p>${searchTerm || filterPosition ? 'Probeer andere filters' : 'Klik op "Nieuwe Game" om te beginnen'}</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = filtered.map(game => {
+        const safeId = escapeHtml(game.id);
+        const safePosition = highlightSearch(game.position || 'Geen positie', searchTerm);
+        const safeInvariant = highlightSearch(game.invariant || 'Geen invariant opgegeven', searchTerm);
+        const isSelected = selectedGameIds.has(game.id);
+        const checkboxHtml = bulkSelectMode ? `
+            <input type="checkbox" class="game-card-checkbox" ${isSelected ? 'checked' : ''} 
+                   onchange="toggleGameSelection('${safeId}')" aria-label="Selecteer game">
+        ` : '';
+        
+        const clickHandler = bulkSelectMode 
+            ? `onclick="toggleGameSelection('${safeId}')"`
+            : `onclick="editGame('${safeId}')"`;
+        
+        const cardClass = `game-card ${bulkSelectMode ? 'checkbox-mode' : ''} ${isSelected ? 'selected' : ''}`;
+        
+        return `
+            <div class="${cardClass}" ${clickHandler} role="button" tabindex="0" aria-label="${bulkSelectMode ? 'Selecteer' : 'Bewerk'} game: ${escapeHtml(game.position || 'Geen positie')}">
+                ${checkboxHtml}
+                <div class="game-position">${safePosition}</div>
+                <div class="game-preview">${safeInvariant}</div>
+            </div>
+        `;
+    }).join('');
+    
+    updateBulkActions();
+}
+
+function updatePositionFilter() {
+    const filterSelect = document.getElementById('gameFilterSelect');
+    if (!filterSelect) return;
+    
+    const positions = gameManager.getUniquePositions();
+    const currentValue = filterSelect.value;
+    
+    // Keep "Alle posities" option
+    filterSelect.innerHTML = '<option value="">Alle posities</option>';
+    
+    positions.forEach(position => {
+        const option = document.createElement('option');
+        option.value = position;
+        option.textContent = position;
+        if (position === currentValue) {
+            option.selected = true;
+        }
+        filterSelect.appendChild(option);
+    });
+}
+
+function renderLessons() {
+    const container = document.getElementById('lessonsContainer');
+    if (!container) return;
+    
+    const searchTerm = document.getElementById('lessonSearchInput')?.value || '';
+    const filtered = lessonManager.getFilteredLessons(searchTerm);
+    
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <h2>${searchTerm ? 'Geen resultaten' : 'Geen lessen'}</h2>
+                <p>${searchTerm ? 'Probeer een andere zoekterm' : 'Klik op "Les Samenstellen" om een les te maken'}</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = filtered.map(lesson => {
+        const safeId = escapeHtml(lesson.id);
+        const safeName = highlightSearch(lesson.name || 'Naamloze les', searchTerm);
+        const safeDescription = highlightSearch(lesson.description || 'Geen beschrijving', searchTerm);
+        const gameCount = lesson.gameIds ? lesson.gameIds.length : 0;
+        const duration = lesson.duration || '?';
+        const level = lesson.level || 'Alle niveaus';
+        return `
+            <div class="lesson-card" onclick="viewLesson('${safeId}')" role="button" tabindex="0" aria-label="Bekijk les: ${escapeHtml(lesson.name || 'Naamloze les')}">
+                <div class="lesson-title">${safeName}</div>
+                <div class="lesson-preview">${safeDescription}</div>
+                <div class="lesson-meta">
+                    <span>📚 ${gameCount} games</span>
+                    <span>⏱️ ${duration} min</span>
+                    <span>🎯 ${escapeHtml(level)}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderAvailableGames() {
+    const container = document.getElementById('availableGamesList');
+    if (!container) return;
+    
+    const searchTerm = document.getElementById('composeSearchInput')?.value || '';
+    const filtered = gameManager.getFilteredGames(searchTerm);
+    
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" style="padding: 20px;">
+                <p>Geen games gevonden</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = filtered.map(game => {
+        const safeId = escapeHtml(game.id);
+        const safePosition = escapeHtml(game.position || 'Geen positie');
+        const safeInvariant = escapeHtml(game.invariant || '');
+        const preview = safeInvariant.length > 50 ? safeInvariant.substring(0, 50) + '...' : safeInvariant;
+        const isSelected = lessonManager.selectedGames.includes(game.id);
+        return `
+            <div class="compose-game ${isSelected ? 'selected' : ''}" 
+                 onclick="toggleGameSelection('${safeId}')" 
+                 role="button" 
+                 tabindex="0"
+                 aria-label="${isSelected ? 'Deselecteer' : 'Selecteer'} game: ${safePosition}"
+                 aria-pressed="${isSelected}">
+                <div>
+                    <strong>${safePosition}</strong>
+                    <div style="font-size: 0.85rem; color: #7f8c8d; margin-top: 5px;">
+                        ${preview}
+                    </div>
+                </div>
+                <div class="checkbox-container">
+                    <input type="checkbox" ${isSelected ? 'checked' : ''} aria-label="Selectie checkbox">
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderSelectedGames() {
+    const container = document.getElementById('selectedGamesList');
+    if (!container) return;
+    
+    if (lessonManager.selectedGames.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state" style="padding: 20px;">
+                <p>Selecteer games uit de linker lijst</p>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = lessonManager.selectedGames.map((gameId, index) => {
+        const game = gameManager.games.find(g => g.id === gameId);
+        if (!game) return '';
+        
+        const safeId = escapeHtml(game.id);
+        const safePosition = escapeHtml(game.position || 'Geen positie');
+        const safeInvariant = escapeHtml(game.invariant || '');
+        const preview = safeInvariant.length > 50 ? safeInvariant.substring(0, 50) + '...' : safeInvariant;
+        
+        return `
+            <div class="sortable-item" draggable="true" data-game-id="${safeId}" role="listitem" aria-label="Game ${index + 1}: ${safePosition}">
+                <div style="display: flex; align-items: center;">
+                    <span class="order-number">${index + 1}</span>
+                    <div>
+                        <strong>${safePosition}</strong>
+                        <div style="font-size: 0.85rem; color: #7f8c8d;">
+                            ${preview}
+                        </div>
+                    </div>
+                </div>
+                <button class="remove-btn" onclick="removeGameFromLesson('${safeId}')" aria-label="Verwijder game">Verwijder</button>
+            </div>
+        `;
+    }).join('');
+
+    // Add drag and drop functionality
+    initDragAndDrop();
+}
+
+let draggedElement = null;
+
+function initDragAndDrop() {
+    const sortableList = document.getElementById('selectedGamesList');
+    if (!sortableList) return;
+    
+    const items = sortableList.querySelectorAll('.sortable-item');
+    
+    items.forEach(item => {
+        item.addEventListener('dragstart', handleDragStart);
+        item.addEventListener('dragover', handleDragOver);
+        item.addEventListener('drop', handleDrop);
+        item.addEventListener('dragenter', handleDragEnter);
+        item.addEventListener('dragleave', handleDragLeave);
+        item.addEventListener('dragend', handleDragEnd);
+    });
+}
+
+function handleDragStart(e) {
+    draggedElement = this;
+    this.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/html', this.innerHTML);
+}
+
+function handleDragOver(e) {
+    if (e.preventDefault) {
+        e.preventDefault();
+    }
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+}
+
+function handleDragEnter(e) {
+    this.classList.add('over');
+}
+
+function handleDragLeave(e) {
+    this.classList.remove('over');
+}
+
+function handleDrop(e) {
+    if (e.stopPropagation) {
+        e.stopPropagation();
+    }
+
+    if (draggedElement !== this) {
+        const draggedId = draggedElement.dataset.gameId;
+        const targetId = this.dataset.gameId;
+        
+        const draggedIndex = lessonManager.selectedGames.indexOf(draggedId);
+        const targetIndex = lessonManager.selectedGames.indexOf(targetId);
+        
+        if (draggedIndex !== -1 && targetIndex !== -1) {
+            lessonManager.selectedGames.splice(draggedIndex, 1);
+            lessonManager.selectedGames.splice(targetIndex, 0, draggedId);
+            renderSelectedGames();
+        }
+    }
+
+    return false;
+}
+
+function handleDragEnd(e) {
+    const items = document.querySelectorAll('.sortable-item');
+    items.forEach(item => {
+        item.classList.remove('over');
+        item.classList.remove('dragging');
+    });
+}
+
+// Game management functions
+function openNewGameModal() {
+    gameManager.currentEditId = null;
+    document.getElementById('modalTitle').textContent = 'Nieuwe Game';
+    document.getElementById('modalPosition').value = '';
+    document.getElementById('modalInvariant').value = '';
+    document.getElementById('modalTaskA').value = '';
+    document.getElementById('modalTaskB').value = '';
+    document.getElementById('modalDifferentiation').value = '';
+    document.getElementById('deleteBtn').style.display = 'none';
+    document.getElementById('gameModal').classList.add('active');
+    
+    // Set ARIA attributes
+    document.getElementById('gameModal').setAttribute('aria-hidden', 'false');
+    document.getElementById('gameModal').setAttribute('role', 'dialog');
+    document.getElementById('gameModal').setAttribute('aria-labelledby', 'modalTitle');
+    
+    document.getElementById('modalPosition').focus();
+}
+
+function editGame(id) {
+    const game = gameManager.games.find(g => g.id === id);
+    if (!game) {
+        showToast('Game niet gevonden', 'error');
+        return;
+    }
+    
+    gameManager.currentEditId = id;
+    document.getElementById('modalTitle').textContent = 'Game Bewerken';
+    document.getElementById('modalPosition').value = game.position || '';
+    document.getElementById('modalInvariant').value = game.invariant || '';
+    document.getElementById('modalTaskA').value = game.taskPlayerA || '';
+    document.getElementById('modalTaskB').value = game.taskPlayerB || '';
+    document.getElementById('modalDifferentiation').value = game.differentiation || '';
+    document.getElementById('deleteBtn').style.display = 'inline-flex';
+    document.getElementById('gameModal').classList.add('active');
+    
+    // Set ARIA attributes
+    document.getElementById('gameModal').setAttribute('aria-hidden', 'false');
+    document.getElementById('gameModal').setAttribute('role', 'dialog');
+    document.getElementById('gameModal').setAttribute('aria-labelledby', 'modalTitle');
+    
+    document.getElementById('modalPosition').focus();
+}
+
+function validateGame(game) {
+    if (!game.position || game.position.trim().length === 0) {
+        return { valid: false, message: 'Positie is verplicht' };
+    }
+    
+    if (game.position.length > CONSTANTS.MAX_TEXT_LENGTH) {
+        return { valid: false, message: `Positie mag maximaal ${CONSTANTS.MAX_TEXT_LENGTH} tekens bevatten` };
+    }
+    
+    return { valid: true };
+}
+
+function saveGame() {
+    const game = {
+        position: sanitizeInput(document.getElementById('modalPosition').value),
+        invariant: sanitizeInput(document.getElementById('modalInvariant').value),
+        taskPlayerA: sanitizeInput(document.getElementById('modalTaskA').value),
+        taskPlayerB: sanitizeInput(document.getElementById('modalTaskB').value),
+        differentiation: sanitizeInput(document.getElementById('modalDifferentiation').value)
+    };
+
+    const validation = validateGame(game);
+    if (!validation.valid) {
+        showToast(validation.message, 'error');
+        return;
+    }
+
+    if (gameManager.currentEditId) {
+        gameManager.updateGame(gameManager.currentEditId, game);
+    } else {
+        gameManager.addGame(game);
+    }
+
+    closeModal('gameModal');
+}
+
+async function deleteGame() {
+    if (gameManager.currentEditId) {
+        const confirmed = await showConfirm(
+            'Weet je zeker dat je deze game wilt verwijderen?',
+            'Game verwijderen'
+        );
+        if (confirmed) {
+            gameManager.deleteGame(gameManager.currentEditId);
+            closeModal('gameModal');
+        }
+    }
+}
+
+// Lesson management functions
+
+function removeGameFromLesson(gameId) {
+    const index = lessonManager.selectedGames.indexOf(gameId);
+    if (index !== -1) {
+        lessonManager.selectedGames.splice(index, 1);
+        renderAvailableGames();
+        renderSelectedGames();
+    }
+}
+
+function validateLesson(lesson) {
+    if (!lesson.name || lesson.name.trim().length === 0) {
+        return { valid: false, message: 'Les naam is verplicht' };
+    }
+    
+    if (lesson.name.length > CONSTANTS.MAX_TEXT_LENGTH) {
+        return { valid: false, message: `Les naam mag maximaal ${CONSTANTS.MAX_TEXT_LENGTH} tekens bevatten` };
+    }
+    
+    if (lesson.gameIds.length === 0) {
+        return { valid: false, message: 'Selecteer minimaal één game' };
+    }
+    
+    const duration = parseInt(lesson.duration);
+    if (lesson.duration && (isNaN(duration) || duration < CONSTANTS.MIN_DURATION || duration > CONSTANTS.MAX_DURATION)) {
+        return { valid: false, message: `Duur moet tussen ${CONSTANTS.MIN_DURATION} en ${CONSTANTS.MAX_DURATION} minuten zijn` };
+    }
+    
+    return { valid: true };
+}
+
+function saveLesson() {
+    const durationValue = document.getElementById('lessonDuration').value.trim();
+    const duration = durationValue ? parseInt(durationValue) : null;
+    
+    const lesson = {
+        name: sanitizeInput(document.getElementById('lessonName').value),
+        description: sanitizeInput(document.getElementById('lessonDescription').value),
+        duration: duration ? duration.toString() : '',
+        level: sanitizeInput(document.getElementById('lessonLevel').value),
+        notes: sanitizeInput(document.getElementById('lessonNotes').value),
+        gameIds: [...lessonManager.selectedGames]
+    };
+
+    const validation = validateLesson(lesson);
+    if (!validation.valid) {
+        showToast(validation.message, 'error');
+        return;
+    }
+
+    if (lessonManager.currentEditId) {
+        lessonManager.updateLesson(lessonManager.currentEditId, lesson);
+    } else {
+        lessonManager.addLesson(lesson);
+    }
+
+    clearLesson();
+    switchTab('lessons');
+    showToast('Les opgeslagen!', 'success');
+}
+
+function clearLesson() {
+    document.getElementById('lessonName').value = '';
+    document.getElementById('lessonDescription').value = '';
+    document.getElementById('lessonDuration').value = '60';
+    document.getElementById('lessonLevel').value = '';
+    document.getElementById('lessonNotes').value = '';
+    lessonManager.selectedGames = [];
+    lessonManager.currentEditId = null;
+    renderAvailableGames();
+    renderSelectedGames();
+}
+
+function viewLesson(id) {
+    const lesson = lessonManager.lessons.find(l => l.id === id);
+    if (!lesson) {
+        showToast('Les niet gevonden', 'error');
+        return;
+    }
+
+    lessonManager.currentViewId = id;
+    document.getElementById('lessonModalTitle').textContent = lesson.name || 'Naamloze les';
+    
+    const safeDescription = escapeHtml(lesson.description || 'Geen beschrijving');
+    const safeLevel = escapeHtml(lesson.level || 'Alle niveaus');
+    const safeDuration = escapeHtml(lesson.duration || '?');
+    const safeNotes = escapeHtml(lesson.notes || '');
+    
+    let content = `
+        <div class="game-field">
+            <label>Beschrijving</label>
+            <p>${safeDescription}</p>
+        </div>
+        <div class="game-field">
+            <label>Niveau</label>
+            <p>${safeLevel}</p>
+        </div>
+        <div class="game-field">
+            <label>Duur</label>
+            <p>${safeDuration} minuten</p>
+        </div>
+        ${lesson.notes ? `
+        <div class="game-field">
+            <label>Notities</label>
+            <p>${safeNotes}</p>
+        </div>
+        ` : ''}
+        <div class="game-field">
+            <label>Games (${lesson.gameIds ? lesson.gameIds.length : 0})</label>
+            <div style="margin-top: 10px;">
+    `;
+
+    if (lesson.gameIds && lesson.gameIds.length > 0) {
+        lesson.gameIds.forEach((gameId, index) => {
+            const game = gameManager.games.find(g => g.id === gameId);
+            if (game) {
+                const safePosition = escapeHtml(game.position || 'Geen positie');
+                const safeInvariant = escapeHtml(game.invariant || '');
+                const safeTaskA = escapeHtml(game.taskPlayerA || '');
+                const safeTaskB = escapeHtml(game.taskPlayerB || '');
+                const safeDiff = escapeHtml(game.differentiation || '');
+                
+                content += `
+                    <div style="border: 1px solid var(--border); border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <span class="order-number">${index + 1}</span>
+                            <strong style="color: var(--primary);">${safePosition}</strong>
+                        </div>
+                        ${game.invariant ? `<p style="margin-bottom: 8px;"><strong>Invariant:</strong> ${safeInvariant}</p>` : ''}
+                        ${game.taskPlayerA ? `<p style="margin-bottom: 8px;"><strong>Speler A:</strong> ${safeTaskA}</p>` : ''}
+                        ${game.taskPlayerB ? `<p style="margin-bottom: 8px;"><strong>Speler B:</strong> ${safeTaskB}</p>` : ''}
+                        ${game.differentiation ? `<p><strong>Differentiatie:</strong> ${safeDiff}</p>` : ''}
+                    </div>
+                `;
+            }
+        });
+    } else {
+        content += '<p>Geen games in deze les</p>';
+    }
+
+    content += `
+            </div>
+        </div>
+    `;
+
+    document.getElementById('lessonModalBody').innerHTML = content;
+    document.getElementById('lessonModal').classList.add('active');
+    
+    // Set ARIA attributes
+    document.getElementById('lessonModal').setAttribute('aria-hidden', 'false');
+    document.getElementById('lessonModal').setAttribute('role', 'dialog');
+    document.getElementById('lessonModal').setAttribute('aria-labelledby', 'lessonModalTitle');
+}
+
+function editLesson() {
+    const lesson = lessonManager.lessons.find(l => l.id === lessonManager.currentViewId);
+    if (!lesson) {
+        showToast('Les niet gevonden', 'error');
+        return;
+    }
+
+    lessonManager.currentEditId = lesson.id;
+    document.getElementById('lessonName').value = lesson.name || '';
+    document.getElementById('lessonDescription').value = lesson.description || '';
+    document.getElementById('lessonDuration').value = lesson.duration || '60';
+    document.getElementById('lessonLevel').value = lesson.level || '';
+    document.getElementById('lessonNotes').value = lesson.notes || '';
+    lessonManager.selectedGames = lesson.gameIds ? [...lesson.gameIds] : [];
+    
+    closeModal('lessonModal');
+    switchTab('compose');
+    renderAvailableGames();
+    renderSelectedGames();
+}
+
+async function deleteLesson() {
+    if (lessonManager.currentViewId) {
+        const confirmed = await showConfirm(
+            'Weet je zeker dat je deze les wilt verwijderen?',
+            'Les verwijderen'
+        );
+        if (confirmed) {
+            lessonManager.deleteLesson(lessonManager.currentViewId);
+            closeModal('lessonModal');
+        }
+    }
+}
+
+function printLesson() {
+    const lesson = lessonManager.lessons.find(l => l.id === lessonManager.currentViewId);
+    if (!lesson) {
+        showToast('Les niet gevonden', 'error');
+        return;
+    }
+
+    const safeName = escapeHtml(lesson.name || 'Naamloze les');
+    const safeLevel = escapeHtml(lesson.level || 'Alle niveaus');
+    const safeDuration = escapeHtml(lesson.duration || '?');
+    const safeDescription = escapeHtml(lesson.description || '');
+    const safeNotes = escapeHtml(lesson.notes || '');
+    
+    let printContent = `
+        <h1>${safeName}</h1>
+        <p><strong>Niveau:</strong> ${safeLevel} | <strong>Duur:</strong> ${safeDuration} minuten</p>
+        ${lesson.description ? `<p><strong>Beschrijving:</strong> ${safeDescription}</p>` : ''}
+        ${lesson.notes ? `<p><strong>Notities:</strong> ${safeNotes}</p>` : ''}
+        <hr style="margin: 20px 0;">
+    `;
+
+    if (lesson.gameIds && lesson.gameIds.length > 0) {
+        lesson.gameIds.forEach((gameId, index) => {
+            const game = gameManager.games.find(g => g.id === gameId);
+            if (game) {
+                const safePosition = escapeHtml(game.position || 'Geen positie');
+                const safeInvariant = escapeHtml(game.invariant || '');
+                const safeTaskA = escapeHtml(game.taskPlayerA || '');
+                const safeTaskB = escapeHtml(game.taskPlayerB || '');
+                const safeDiff = escapeHtml(game.differentiation || '');
+                
+                printContent += `
+                    <div class="print-game">
+                        <h3>Game ${index + 1}: ${safePosition}</h3>
+                        ${game.invariant ? `<div class="print-field"><strong>Invariant:</strong> ${safeInvariant}</div>` : ''}
+                        ${game.taskPlayerA ? `<div class="print-field"><strong>Opdracht Speler A:</strong> ${safeTaskA}</div>` : ''}
+                        ${game.taskPlayerB ? `<div class="print-field"><strong>Opdracht Speler B:</strong> ${safeTaskB}</div>` : ''}
+                        ${game.differentiation ? `<div class="print-field"><strong>Differentiatie:</strong> ${safeDiff}</div>` : ''}
+                    </div>
+                `;
+            }
+        });
+    }
+
+    document.getElementById('lessonPrintView').innerHTML = printContent;
+    window.print();
+}
+
+// Custom confirm dialog
+function showConfirm(message, title = 'Bevestig actie') {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('confirmModal');
+        const titleEl = document.getElementById('confirmModalTitle');
+        const messageEl = document.getElementById('confirmMessage');
+        const okBtn = document.getElementById('confirmOkBtn');
+        
+        if (!modal || !titleEl || !messageEl || !okBtn) {
+            resolve(window.confirm(message));
+            return;
+        }
+        
+        titleEl.textContent = title;
+        messageEl.textContent = message;
+        
+        // Remove old event listeners
+        const newOkBtn = okBtn.cloneNode(true);
+        okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+        
+        newOkBtn.onclick = () => {
+            closeModal('confirmModal');
+            resolve(true);
+        };
+        
+        document.getElementById('confirmCancelBtn').onclick = () => {
+            closeModal('confirmModal');
+            resolve(false);
+        };
+        
+        modal.classList.add('active');
+        modal.setAttribute('aria-hidden', 'false');
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-labelledby', 'confirmModalTitle');
+    });
+}
+
+// Theme management
+function toggleTheme() {
+    const currentTheme = document.documentElement.getAttribute('data-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    
+    const themeToggle = document.querySelector('.theme-toggle');
+    if (themeToggle) {
+        themeToggle.textContent = newTheme === 'dark' ? '☀️' : '🌙';
+    }
+}
+
+function loadTheme() {
+    const savedTheme = localStorage.getItem('theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    document.documentElement.setAttribute('data-theme', savedTheme);
+    const themeToggle = document.querySelector('.theme-toggle');
+    if (themeToggle) {
+        themeToggle.textContent = savedTheme === 'dark' ? '☀️' : '🌙';
+    }
+}
+
+// Bulk select functionality
+function toggleBulkSelect() {
+    bulkSelectMode = !bulkSelectMode;
+    selectedGameIds.clear();
+    
+    const btn = document.getElementById('bulkSelectBtn');
+    if (btn) {
+        btn.textContent = bulkSelectMode ? '❌ Annuleer' : '☑️ Selecteren';
+    }
+    
+    const bulkActions = document.getElementById('bulkActions');
+    if (bulkActions) {
+        bulkActions.classList.toggle('active', bulkSelectMode);
+    }
+    
+    renderGames();
+}
+
+function toggleGameSelection(gameId) {
+    if (!bulkSelectMode) {
+        // Original behavior - toggle game selection in compose mode
+        const index = lessonManager.selectedGames.indexOf(gameId);
+        if (index === -1) {
+            lessonManager.selectedGames.push(gameId);
+        } else {
+            lessonManager.selectedGames.splice(index, 1);
+        }
+        renderAvailableGames();
+        renderSelectedGames();
+        return;
+    }
+    
+    // Bulk select mode
+    if (selectedGameIds.has(gameId)) {
+        selectedGameIds.delete(gameId);
+    } else {
+        selectedGameIds.add(gameId);
+    }
+    renderGames();
+    updateBulkActions();
+}
+
+function updateBulkActions() {
+    const bulkActions = document.getElementById('bulkActions');
+    const bulkCount = document.getElementById('bulkCount');
+    
+    if (bulkActions && bulkCount) {
+        const count = selectedGameIds.size;
+        bulkCount.textContent = count;
+        bulkActions.classList.toggle('active', count > 0);
+    }
+}
+
+async function bulkDeleteGames() {
+    if (selectedGameIds.size === 0) return;
+    
+    const count = selectedGameIds.size;
+    const confirmed = await showConfirm(
+        `Weet je zeker dat je ${count} game(s) wilt verwijderen?`,
+        'Games verwijderen'
+    );
+    
+    if (confirmed) {
+        selectedGameIds.forEach(id => {
+            gameManager.deleteGame(id);
+        });
+        selectedGameIds.clear();
+        toggleBulkSelect();
+        showToast(`${count} games verwijderd`, 'success');
+    }
+}
+
+// Dashboard functionality
+function showDashboard() {
+    const modal = document.getElementById('dashboardModal');
+    const body = document.getElementById('dashboardBody');
+    
+    if (!modal || !body) return;
+    
+    const totalGames = gameManager.games.length;
+    const totalLessons = lessonManager.lessons.length;
+    const totalGamesInLessons = lessonManager.lessons.reduce((sum, lesson) => {
+        return sum + (lesson.gameIds ? lesson.gameIds.length : 0);
+    }, 0);
+    
+    const avgGamesPerLesson = totalLessons > 0 ? (totalGamesInLessons / totalLessons).toFixed(1) : 0;
+    
+    const avgDuration = lessonManager.lessons.reduce((sum, lesson) => {
+        return sum + (parseInt(lesson.duration) || 0);
+    }, 0) / (totalLessons || 1);
+    
+    const positions = gameManager.getUniquePositions();
+    const mostUsedPosition = getMostUsedPosition();
+    
+    body.innerHTML = `
+        <div class="dashboard">
+            <div class="dashboard-card">
+                <h3>${totalGames}</h3>
+                <p>Totale Games</p>
+            </div>
+            <div class="dashboard-card">
+                <h3>${totalLessons}</h3>
+                <p>Totale Lessen</p>
+            </div>
+            <div class="dashboard-card">
+                <h3>${avgGamesPerLesson}</h3>
+                <p>Gem. Games per Les</p>
+            </div>
+            <div class="dashboard-card">
+                <h3>${Math.round(avgDuration)}</h3>
+                <p>Gem. Lesduur (min)</p>
+            </div>
+            <div class="dashboard-card">
+                <h3>${positions.length}</h3>
+                <p>Unieke Posities</p>
+            </div>
+            <div class="dashboard-card">
+                <h3>${mostUsedPosition || 'N/A'}</h3>
+                <p>Meest Gebruikte Positie</p>
+            </div>
+        </div>
+        <div style="margin-top: 20px;">
+            <h3 style="margin-bottom: 10px; color: var(--primary);">Posities Overzicht</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+                ${positions.map(pos => {
+                    const count = gameManager.games.filter(g => g.position === pos).length;
+                    return `<span style="background: var(--bg-secondary); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);">
+                        ${escapeHtml(pos)} (${count})
+                    </span>`;
+                }).join('')}
+            </div>
+        </div>
+    `;
+    
+    modal.classList.add('active');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-labelledby', 'dashboardModalTitle');
+}
+
+function getMostUsedPosition() {
+    const positionCounts = {};
+    gameManager.games.forEach(game => {
+        const pos = game.position || 'Geen positie';
+        positionCounts[pos] = (positionCounts[pos] || 0) + 1;
+    });
+    
+    let maxCount = 0;
+    let mostUsed = null;
+    Object.entries(positionCounts).forEach(([pos, count]) => {
+        if (count > maxCount) {
+            maxCount = count;
+            mostUsed = pos;
+        }
+    });
+    
+    return mostUsed;
+}
+
+// Utility functions
+function closeModal(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+    
+    if (modalId === 'gameModal') {
+        gameManager.currentEditId = null;
+    } else if (modalId === 'lessonModal') {
+        lessonManager.currentViewId = null;
+    } else if (modalId === 'confirmModal') {
+        if (confirmResolve) {
+            confirmResolve(false);
+            confirmResolve = null;
+        }
+    }
+}
+
+function showToast(message, type = 'success', canUndo = false) {
+    const toast = document.getElementById('toast');
+    if (!toast) return;
+    
+    toast.textContent = message;
+    toast.className = `toast show ${type}`;
+    toast.setAttribute('role', 'alert');
+    
+    if (canUndo) {
+        toast.style.cursor = 'pointer';
+        const undoHandler = () => {
+            if (type === 'error') {
+                // Determine which manager to use based on context
+                if (gameManager.deletedGame) {
+                    gameManager.undoDelete();
+                } else if (lessonManager.deletedLesson) {
+                    lessonManager.undoDelete();
+                }
+            }
+            toast.onclick = null;
+            toast.style.cursor = '';
+        };
+        toast.onclick = undoHandler;
+        
+        const currentTimeout = type === 'error' 
+            ? (gameManager.deletedGame ? gameManager.undoTimeout : lessonManager.undoTimeout)
+            : null;
+        
+        if (currentTimeout) {
+            clearTimeout(currentTimeout);
+        }
+        
+        const timeout = setTimeout(() => {
+            if (type === 'error') {
+                if (gameManager.deletedGame) {
+                    gameManager.deletedGame = null;
+                } else if (lessonManager.deletedLesson) {
+                    lessonManager.deletedLesson = null;
+                }
+            }
+            toast.onclick = null;
+            toast.style.cursor = '';
+        }, CONSTANTS.UNDO_TIMEOUT);
+        
+        if (type === 'error') {
+            if (gameManager.deletedGame) {
+                gameManager.undoTimeout = timeout;
+            } else {
+                lessonManager.undoTimeout = timeout;
+            }
+        }
+    }
+    
+    setTimeout(() => {
+        toast.classList.remove('show');
+    }, CONSTANTS.TOAST_DURATION);
+}
+
+function updateStats() {
+    const gameCountEl = document.getElementById('gameCount');
+    const lessonCountEl = document.getElementById('lessonCount');
+    const lastSavedEl = document.getElementById('lastSaved');
+    
+    if (gameCountEl) {
+        gameCountEl.textContent = `${gameManager.games.length} game${gameManager.games.length !== 1 ? 's' : ''}`;
+    }
+    
+    if (lessonCountEl) {
+        lessonCountEl.textContent = `${lessonManager.lessons.length} ${lessonManager.lessons.length !== 1 ? 'lessen' : 'les'}`;
+    }
+    
+    if (lastSavedEl) {
+        const lastSaved = localStorage.getItem('lastSaved');
+        if (lastSaved) {
+            try {
+                const date = new Date(lastSaved);
+                const timeStr = date.toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' });
+                lastSavedEl.textContent = `Laatst opgeslagen: ${timeStr}`;
+            } catch (e) {
+                console.error('Error formatting date:', e);
+            }
+        }
+    }
+}
+
+// Export/Import functions with loading states
+function setLoadingState(isLoading) {
+    const buttons = document.querySelectorAll('.btn-success');
+    buttons.forEach(btn => {
+        if (isLoading) {
+            btn.disabled = true;
+            const originalText = btn.innerHTML;
+            btn.dataset.originalText = originalText;
+            btn.innerHTML = '<span class="loading"></span> Laden...';
+        } else {
+            btn.disabled = false;
+            if (btn.dataset.originalText) {
+                btn.innerHTML = btn.dataset.originalText;
+                delete btn.dataset.originalText;
+            }
+        }
+    });
+}
+
+function exportAll() {
+    try {
+        setLoadingState(true);
+        
+        const allData = {
+            games: gameManager.games,
+            lessons: lessonManager.lessons,
+            exportDate: new Date().toISOString(),
+            version: "2.0"
+        };
+        
+        const dataStr = JSON.stringify(allData, null, 2);
+        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+        const exportFileDefaultName = `bjj-complete-${new Date().toISOString().split('T')[0]}.json`;
+        
+        const linkElement = document.createElement('a');
+        linkElement.setAttribute('href', dataUri);
+        linkElement.setAttribute('download', exportFileDefaultName);
+        linkElement.click();
+        
+        showToast(`${gameManager.games.length} games + ${lessonManager.lessons.length} lessen geëxporteerd`, 'success');
+        
+        setTimeout(() => setLoadingState(false), 500);
+    } catch (e) {
+        console.error('Export error:', e);
+        showToast('Fout bij exporteren', 'error');
+        setLoadingState(false);
+    }
+}
+
+async function importAll(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    setLoadingState(true);
+    
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        try {
+            const imported = JSON.parse(e.target.result);
+            
+            // Check if it's the new combined format
+            if (imported.games && imported.lessons) {
+                const gameCount = imported.games.length || 0;
+                const lessonCount = imported.lessons.length || 0;
+                const currentGameCount = gameManager.games.length;
+                const currentLessonCount = lessonManager.lessons.length;
+                
+                const confirmed = await showConfirm(
+                    `Dit vervangt je huidige data:\n` +
+                    `Games: ${currentGameCount} → ${gameCount}\n` +
+                    `Lessen: ${currentLessonCount} → ${lessonCount}\n\n` +
+                    `Doorgaan?`,
+                    'Data importeren'
+                );
+                
+                if (confirmed) {
+                    gameManager.games = Array.isArray(imported.games) ? imported.games : [];
+                    lessonManager.lessons = Array.isArray(imported.lessons) ? imported.lessons : [];
+                    gameManager.saveToStorage();
+                    lessonManager.saveToStorage();
+                    renderGames();
+                    renderLessons();
+                    renderAvailableGames();
+                    showToast(`${gameCount} games + ${lessonCount} lessen geïmporteerd`, 'success');
+                }
+            }
+            // Backward compatibility: if it's just an array, assume it's games only
+            else if (Array.isArray(imported)) {
+                const confirmed = await showConfirm(
+                    `Dit lijkt een oud games-bestand. Alleen games importeren (${imported.length} games)? Lessen blijven ongewijzigd.`,
+                    'Games importeren'
+                );
+                if (confirmed) {
+                    gameManager.games = imported;
+                    gameManager.saveToStorage();
+                    renderGames();
+                    renderAvailableGames();
+                    showToast(`${imported.length} games geïmporteerd`, 'success');
+                }
+            }
+            else {
+                throw new Error('Invalid format');
+            }
+        } catch (error) {
+            console.error('Import error:', error);
+            showToast('Fout bij importeren: ongeldig bestand', 'error');
+        } finally {
+            setLoadingState(false);
+            event.target.value = '';
+        }
+    };
+    
+    reader.onerror = () => {
+        showToast('Fout bij lezen van bestand', 'error');
+        setLoadingState(false);
+        event.target.value = '';
+    };
+    
+    reader.readAsText(file);
+}
+
+// Debounced search functions
+const debouncedRenderGames = debounce(renderGames, CONSTANTS.SEARCH_DEBOUNCE);
+const debouncedRenderLessons = debounce(renderLessons, CONSTANTS.SEARCH_DEBOUNCE);
+const debouncedRenderAvailableGames = debounce(renderAvailableGames, CONSTANTS.SEARCH_DEBOUNCE);
+
+// Event listeners
+document.addEventListener('DOMContentLoaded', () => {
+    // Search inputs
+    const gameSearchInput = document.getElementById('gameSearchInput');
+    const lessonSearchInput = document.getElementById('lessonSearchInput');
+    const composeSearchInput = document.getElementById('composeSearchInput');
+    
+    if (gameSearchInput) {
+        gameSearchInput.addEventListener('input', debouncedRenderGames);
+    }
+    
+    if (lessonSearchInput) {
+        lessonSearchInput.addEventListener('input', debouncedRenderLessons);
+    }
+    
+    if (composeSearchInput) {
+        composeSearchInput.addEventListener('input', debouncedRenderAvailableGames);
+    }
+    
+    // Keyboard navigation
+    document.addEventListener('keydown', (e) => {
+        // Escape to close modals
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.modal.active').forEach(modal => {
+                const modalId = modal.id;
+                closeModal(modalId);
+            });
+        }
+        
+        // Ctrl+S to save game modal
+        if (e.ctrlKey && e.key === 's') {
+            e.preventDefault();
+            if (document.getElementById('gameModal').classList.contains('active')) {
+                saveGame();
+            } else if (document.getElementById('composePage').classList.contains('active')) {
+                saveLesson();
+            }
+        }
+        
+        // Enter on cards to activate
+        if (e.key === 'Enter' && e.target.classList.contains('game-card')) {
+            e.target.click();
+        }
+        
+        if (e.key === 'Enter' && e.target.classList.contains('lesson-card')) {
+            e.target.click();
+        }
+        
+        // Tab navigation in modals
+        if (e.key === 'Tab') {
+            const activeModal = document.querySelector('.modal.active');
+            if (activeModal) {
+                const focusableElements = activeModal.querySelectorAll(
+                    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+                );
+                const firstElement = focusableElements[0];
+                const lastElement = focusableElements[focusableElements.length - 1];
+                
+                if (e.shiftKey && document.activeElement === firstElement) {
+                    e.preventDefault();
+                    lastElement.focus();
+                } else if (!e.shiftKey && document.activeElement === lastElement) {
+                    e.preventDefault();
+                    firstElement.focus();
+                }
+            }
+        }
+    });
+    
+    // Auto-save visual feedback
+    document.querySelectorAll('.modal-body textarea, .modal-body input').forEach(field => {
+        field.addEventListener('input', () => {
+            field.parentElement.classList.add('saving');
+            setTimeout(() => {
+                field.parentElement.classList.remove('saving');
+            }, 500);
+        });
+    });
+    
+    // Initialize
+    loadTheme();
+    renderGames();
+    updateStats();
+    updatePositionFilter();
+    
+    // Set initial ARIA attributes
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.setAttribute('aria-hidden', 'true');
+    });
+});
+
+// Make functions globally available
+window.switchTab = switchTab;
+window.openNewGameModal = openNewGameModal;
+window.editGame = editGame;
+window.saveGame = saveGame;
+window.deleteGame = deleteGame;
+window.toggleGameSelection = toggleGameSelection;
+window.removeGameFromLesson = removeGameFromLesson;
+window.saveLesson = saveLesson;
+window.clearLesson = clearLesson;
+window.viewLesson = viewLesson;
+window.editLesson = editLesson;
+window.deleteLesson = deleteLesson;
+window.printLesson = printLesson;
+window.closeModal = closeModal;
+window.exportAll = exportAll;
+window.importAll = importAll;
+window.toggleTheme = toggleTheme;
+window.toggleBulkSelect = toggleBulkSelect;
+window.bulkDeleteGames = bulkDeleteGames;
+window.showDashboard = showDashboard;
+
