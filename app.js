@@ -1806,6 +1806,14 @@ async function refreshData() {
             return;
         }
         
+        // Check if managers are initialized
+        if (!gameManager || !lessonManager) {
+            console.error('❌ Managers niet geïnitialiseerd!');
+            showToast('Managers niet klaar. Herlaad de pagina.', 'error');
+            setLoadingState(false);
+            return;
+        }
+        
         // Reload data from Supabase
         await Promise.all([
             gameManager.loadGames(),
@@ -1828,6 +1836,9 @@ async function refreshData() {
         setLoadingState(false);
     }
 }
+
+// Make refreshData available immediately (before DOMContentLoaded)
+window.refreshData = refreshData;
 
 async function importAll(event) {
     const file = event.target.files[0];
